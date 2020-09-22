@@ -1,0 +1,36 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: server
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: server
+  labels:
+    app: server
+spec:
+  serviceAccountName: server
+  containers:
+    - name: server
+      image: kennethreitz/httpbin
+      ports:
+        - containerPort: 80
+      resources:
+        limits:
+          cpu: 100m
+          memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+  labels:
+    app: server
+spec:
+  selector:
+    app: server
+  ports:
+    - port: 80
+      targetPort: 80
