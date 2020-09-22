@@ -64,7 +64,6 @@ spec:
         # Main container with APP
         - name: bookthief
           image: "${CTR_REGISTRY}/bookthief:${CTR_TAG}"
-          imagePullPolicy: Always
           command: ["/bookthief"]
 
           env:
