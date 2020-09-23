@@ -4,16 +4,19 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/docker/docker/client"
+	smiAccess "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/access/v1alpha2"
+	smiSpecs "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/specs/v1alpha3"
+	smiTrafficAccessClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/access/clientset/versioned"
+	smiTrafficSpecClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/specs/clientset/versioned"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -101,44 +104,30 @@ func TestOneShot(t *testing.T) {
 		t.Fatal("error creating kube clientset:", err)
 	}
 
-	bookbuyerNS := "bookbuyer"
-	bookthiefNS := "bookthief"
-	bookstoreNS := "bookstore"
-	bookwarehouseNS := "bookwarehouse"
-	for _, name := range []string{bookbuyerNS, bookthiefNS, bookstoreNS, bookwarehouseNS} {
-		_, err := clientset.CoreV1().Namespaces().Get(context.TODO(), name, metav1.GetOptions{})
-		if errors.IsNotFound(err) {
-			t.Log("Creating namespace", name)
-			_, err := clientset.CoreV1().Namespaces().Create(context.TODO(),
-				&corev1.Namespace{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: name,
-					},
-				},
-				metav1.CreateOptions{})
-			if err != nil {
-				t.Fatalf("error creating namespace %s: %v\n", name, err)
-			}
-		} else if err != nil {
-			t.Fatalf("error getting app namespace %s: %T %v\n", name, err, err)
-		}
-
-		// TODO: refactor namespace add to be able to call it directly here vs. exec-ing CLI.
-		t.Log("Adding namespace", name, "to the control plane")
-		osmNamespaceAdd := exec.Command(filepath.FromSlash("../../bin/osm"), "namespace", "add", name,
-			"--enable-sidecar-injection",
-			"--namespace="+controlPlaneNS,
-		)
-		stdout := bytes.NewBuffer(nil)
-		stderr := bytes.NewBuffer(nil)
-		osmNamespaceAdd.Stdout = stdout
-		osmNamespaceAdd.Stderr = stderr
-		if err := osmNamespaceAdd.Run(); err != nil {
-			t.Log("error running osm namespace add:", err)
-			t.Logf("stdout: %s\n", stdout)
-			t.Logf("stderr: %s\n", stderr)
-			t.FailNow()
-		}
+	appNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "e2e",
+		},
+	}
+	_, err = clientset.CoreV1().Namespaces().Create(context.TODO(), appNS, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("error creating namespace %s: %v", appNS, err)
+	}
+	// TODO: refactor namespace add to be able to call it directly here vs. exec-ing CLI.
+	t.Log("Adding namespace", appNS.Name, "to the control plane")
+	osmNamespaceAdd := exec.Command(filepath.FromSlash("../../bin/osm"), "namespace", "add", appNS.Name,
+		"--enable-sidecar-injection",
+		"--namespace="+controlPlaneNS,
+	)
+	stdout := bytes.NewBuffer(nil)
+	stderr := bytes.NewBuffer(nil)
+	osmNamespaceAdd.Stdout = stdout
+	osmNamespaceAdd.Stderr = stderr
+	if err := osmNamespaceAdd.Run(); err != nil {
+		t.Log("error running osm namespace add:", err)
+		t.Logf("stdout: %s\n", stdout)
+		t.Logf("stderr: %s\n", stderr)
+		t.FailNow()
 	}
 
 	controlPlanePodsReadyTimeout := 90 * time.Second
@@ -165,50 +154,198 @@ func TestOneShot(t *testing.T) {
 	t.Log("Control plane pods ready")
 
 	t.Log("Deploying apps")
-	deployApps := exec.Command("bash", filepath.FromSlash("demo/deploy-apps.sh"))
-	deployApps.Dir = filepath.FromSlash("../..")
-	deployAppsStdout := bytes.NewBuffer(nil)
-	deployAppsStderr := bytes.NewBuffer(nil)
-	deployApps.Stdout = deployAppsStdout
-	deployApps.Stderr = deployAppsStderr
-	if err := deployApps.Run(); err != nil {
-		t.Log("error running deploy-apps.sh:", err)
-		t.Logf("stdout: %s\n", deployAppsStdout)
-		t.Logf("stderr: %s\n", deployAppsStderr)
-		t.FailNow()
+	serverName := "server"
+	serverLabels := map[string]string{
+		"app": serverName,
+	}
+	serverSA := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: serverName,
+		},
+	}
+	_, err = clientset.CoreV1().ServiceAccounts(appNS.Name).Create(context.TODO(), serverSA, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal("error creating server service account:", err)
+	}
+	serverPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   serverName,
+			Labels: serverLabels,
+		},
+		Spec: corev1.PodSpec{
+			ServiceAccountName: serverSA.Name,
+			Containers: []corev1.Container{
+				{
+					Name:  serverName,
+					Image: "kennethreitz/httpbin",
+					Ports: []corev1.ContainerPort{
+						{
+							ContainerPort: 80,
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err = clientset.CoreV1().Pods(appNS.Name).Create(context.TODO(), serverPod, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal("error creating server pod:", err)
+	}
+	serverSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   serverName,
+			Labels: serverLabels,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: serverLabels,
+			Ports: []corev1.ServicePort{
+				{
+					Port:       80,
+					TargetPort: intstr.FromInt(80),
+				},
+			},
+		},
+	}
+	_, err = clientset.CoreV1().Services(appNS.Name).Create(context.TODO(), serverSvc, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal("error creating server service:", err)
+	}
+	clientName := "client"
+	clientLabels := map[string]string{
+		"app": clientName,
+	}
+	clientSA := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: clientName,
+		},
+	}
+	_, err = clientset.CoreV1().ServiceAccounts(appNS.Name).Create(context.TODO(), clientSA, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal("error creating client service account:", err)
+	}
+	clientPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   clientName,
+			Labels: clientLabels,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy:      corev1.RestartPolicyNever,
+			ServiceAccountName: clientSA.Name,
+			Containers: []corev1.Container{
+				{
+					Name:  clientName,
+					Image: "curlimages/curl:7.72.0",
+					Args: []string{
+						"-fv",
+						"--no-progress-meter",
+						"--max-time", "5",
+						"--retry", "60",
+						"--retry-delay", "1",
+						"--retry-connrefused",
+						"server/status/200",
+					},
+				},
+			},
+		},
+	}
+	_, err = clientset.CoreV1().Pods(appNS.Name).Create(context.TODO(), clientPod, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal("error creating client pod:", err)
+	}
+	clientSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   clientName,
+			Labels: clientLabels,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: clientLabels,
+			Ports: []corev1.ServicePort{
+				{
+					Port: 65535, // unused
+				},
+			},
+		},
+	}
+	_, err = clientset.CoreV1().Services(appNS.Name).Create(context.TODO(), clientSvc, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal("error creating client service:", err)
 	}
 
 	t.Log("Deploying SMI policies")
-	deployPolicies := exec.Command("bash", filepath.FromSlash("demo/deploy-smi-policies.sh"))
-	deployPolicies.Dir = filepath.FromSlash("../..")
-	deployPoliciesStdout := bytes.NewBuffer(nil)
-	deployPoliciesStderr := bytes.NewBuffer(nil)
-	deployPolicies.Stdout = deployPoliciesStdout
-	deployPolicies.Stderr = deployPoliciesStderr
-	if err := deployPolicies.Run(); err != nil {
-		t.Log("error running deploy-smi-policies.sh:", err)
-		t.Logf("stdout: %s\n", deployPoliciesStdout)
-		t.Logf("stderr: %s\n", deployPoliciesStderr)
-		t.FailNow()
+	trafficSpec := &smiSpecs.HTTPRouteGroup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "routes",
+		},
+		Spec: smiSpecs.HTTPRouteGroupSpec{
+			Matches: []smiSpecs.HTTPMatch{
+				{
+					Name:      "all",
+					PathRegex: ".*",
+					Methods:   []string{string(smiSpecs.HTTPRouteMethodAll)},
+				},
+			},
+		},
+	}
+	smiSpecClientset, err := smiTrafficSpecClient.NewForConfig(config)
+	if err != nil {
+		t.Fatal("error creating traffic spec client:", err)
+	}
+	_, err = smiSpecClientset.SpecsV1alpha3().HTTPRouteGroups(appNS.Name).Create(context.TODO(), trafficSpec, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal("error creating HTTPRouteGroup:", err)
+	}
+	trafficTarget := &smiAccess.TrafficTarget{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "target",
+		},
+		Spec: smiAccess.TrafficTargetSpec{
+			Destination: smiAccess.IdentityBindingSubject{
+				Kind:      "ServiceAccount",
+				Name:      serverSA.Name,
+				Namespace: appNS.Name,
+			},
+			Rules: []smiAccess.TrafficTargetRule{
+				{
+					Kind:    "HTTPRouteGroup",
+					Name:    trafficSpec.Name,
+					Matches: []string{"all"},
+				},
+			},
+			Sources: []smiAccess.IdentityBindingSubject{
+				{
+					Kind:      "ServiceAccount",
+					Name:      clientSA.Name,
+					Namespace: appNS.Name,
+				},
+			},
+		},
+	}
+	smiAccessClientset, err := smiTrafficAccessClient.NewForConfig(config)
+	if err != nil {
+		t.Fatal("error creating traffic access client:", err)
+	}
+	_, err = smiAccessClientset.AccessV1alpha2().TrafficTargets(appNS.Name).Create(context.TODO(), trafficTarget, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal("error creating HTTPRouteGroup:", err)
 	}
 
-	// TODO: refactor maestro to be able to call it directly here vs. exec-ing go run.
-	t.Log("Running maestro")
-	maestro := exec.Command("go", "run", filepath.FromSlash("../../ci/cmd"))
-	maestro.Env = append(maestro.Env,
-		"HOME="+os.Getenv("HOME"),
-		"CI_MAX_WAIT_FOR_POD_TIME_SECONDS=60",
-		"CI_WAIT_FOR_OK_SECONDS=60",
-	)
-	maestroStdout := bytes.NewBuffer(nil)
-	maestroStderr := bytes.NewBuffer(nil)
-	maestro.Stdout = maestroStdout
-	maestro.Stderr = maestroStderr
-	if err := maestro.Run(); err != nil {
-		t.Log("error running maestro:", err)
-		t.Logf("stdout: %s\n", maestroStdout)
-		t.Logf("stderr: %s\n", maestroStderr)
-		t.FailNow()
+	var client *corev1.Pod
+	t.Logf("Waiting for client to finish")
+	if err := wait.PollImmediateInfinite(5*time.Second, func() (bool, error) {
+		client, err = clientset.CoreV1().Pods(appNS.Name).Get(context.TODO(), clientPod.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		ctr := client.Status.ContainerStatuses[0]
+		return ctr.State.Terminated != nil, nil
+	}); err != nil {
+		t.Fatal("error waiting for client pod:", err)
 	}
-	t.Log("Maestro succeeded")
+	exitCode := client.Status.ContainerStatuses[0].State.Terminated.ExitCode
+	switch exitCode {
+	case 0:
+		t.Log("client succeeded")
+	default:
+		t.Error("client failed with exit code", exitCode)
+	}
 }

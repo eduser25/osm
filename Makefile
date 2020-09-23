@@ -88,7 +88,7 @@ kind-reset:
 	kind delete cluster --name osm
 
 .PHONY: test-e2e
-test-e2e: docker-build build-osm
+test-e2e: docker-build-osm-controller docker-build-init build-osm
 	go test -v ./tests/e2e
 
 .env:
