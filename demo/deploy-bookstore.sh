@@ -76,6 +76,7 @@ spec:
       serviceAccountName: "$SVC"
       containers:
         - image: "${CTR_REGISTRY}/bookstore:${CTR_TAG}"
+          imagePullPolicy: Always
           name: $SVC
           ports:
             - containerPort: 80
