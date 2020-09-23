@@ -6,7 +6,6 @@ set -aueo pipefail
 source .env
 
 DEPLOY_WITH_SAME_SA="${DEPLOY_WITH_SAME_SA:-false}"
-CTR_REGISTRY_CREDS_NAME="${CTR_REGISTRY_CREDS_NAME:-}"
 
 # Deploy apps in the order of their dependencies to avoid initial timing errors
 # in osm-controller logs. Server apps are deployed before client apps.
@@ -16,7 +15,7 @@ CTR_REGISTRY_CREDS_NAME="${CTR_REGISTRY_CREDS_NAME:-}"
 # Deploy bookstore versions
 if [ "$DEPLOY_WITH_SAME_SA" = "true" ]; then
     ./demo/deploy-bookstore-with-same-sa.sh "v1"
-    ./demo/deploy-bookstore-with-same-sa.sh "v2"
+    ./demo/deploy-bookstore-with-same-sa.sh "v2"    
 else
     ./demo/deploy-bookstore.sh "v1"
     ./demo/deploy-bookstore.sh "v2"
