@@ -53,7 +53,7 @@ type OsmTestData struct {
 	Namespaces map[string]bool
 }
 
-func parseFlags(td *OsmTestData) {
+func registerFlags(td *OsmTestData) {
 	flag.BoolVar(&td.cleanupTest, "cleanupTest", true, "Cleanup test resources when done")
 	flag.BoolVar(&td.waitForCleanup, "waitForCleanup", false, "Wait for effective deletion of resources")
 
@@ -72,21 +72,16 @@ func parseFlags(td *OsmTestData) {
 		return "osm-system"
 	}(), "OSM mesh name")
 
-	flag.Parse()
-
 	if len(td.ctrRegistry) == 0 {
 		td.T.Log("warn: did not read any container registry")
 	}
 }
 
 // InitTestData Initializes the test structures
-func InitTestData(t GinkgoTInterface) OsmTestData {
+func (td *OsmTestData) InitTestData(t GinkgoTInterface) {
 	// Parse Generic test flags
-	var td OsmTestData = OsmTestData{
-		T:          t,
-		Namespaces: make(map[string]bool),
-	}
-	parseFlags(&td)
+	td.T = t
+	td.Namespaces = make(map[string]bool)
 
 	if td.kindCluster {
 		td.T.Logf("Creating kind cluster: %s", td.clusterName)
@@ -116,8 +111,6 @@ func InitTestData(t GinkgoTInterface) OsmTestData {
 	td.Client = clientset
 
 	td.InitSMIClients()
-
-	return td
 }
 
 // InstallOSMOpts describes install options for OSM
