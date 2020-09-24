@@ -6,17 +6,23 @@ import (
 	. "github.com/onsi/ginkgo"
 )
 
-var _ = Describe("Test and deploy a simple mesh", func() {
-	var td OsmTestData
+// Since parseFlags is global, this is the Ginkgo way to do it. Cant help it.
+// https://github.com/onsi/ginkgo/issues/265
+var td OsmTestData
 
+func init() {
+	registerFlags(&td)
+}
+
+var _ = Describe("Test and deploy a simple mesh", func() {
 	Context("Test OSM testing APIs", func() {
+		td.InitTestData(GinkgoT())
 		sourceNs := "client"
 		destNs := "server"
 		var ns []string = []string{sourceNs, destNs}
 
 		It("Test testing APIs in a simple e2e test", func() {
 			// Init test
-			td = InitTestData(GinkgoT())
 
 			// For cleanup only while testing, not needed
 			for _, n := range ns {
@@ -85,7 +91,6 @@ var _ = Describe("Test and deploy a simple mesh", func() {
 
 			// All ready. Expect client to reach server
 			// Need to get the pod though.
-
 			for true {
 				td.HTTPRequest(HTTPRequestTest{
 					sourceNs:        srcPod.Namespace,
