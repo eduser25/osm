@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,11 +16,14 @@ import (
 	. "github.com/onsi/ginkgo"
 
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/kind/pkg/cluster"
 )
 
@@ -27,7 +31,8 @@ import (
 type OsmTestData struct {
 	T GinkgoTInterface // for common test logging
 
-	cleanupTest bool // Cleanup test-related resources once finished
+	cleanupTest    bool // Cleanup test-related resources once finished
+	waitForCleanup bool // Forces application to wait for deletion of resources
 
 	// OSM install-time variables
 	osmMeshName        string
@@ -41,6 +46,7 @@ type OsmTestData struct {
 	// Cluster handles and rest config
 	RestConfig      *rest.Config
 	Client          *kubernetes.Clientset
+	SmiClients      *SmiClients
 	ClusterProvider *cluster.Provider // provider, used when kindCluster is used
 
 	// Managed resources, used to track what gets cleaned up after the test
@@ -49,6 +55,7 @@ type OsmTestData struct {
 
 func parseFlags(td *OsmTestData) {
 	flag.BoolVar(&td.cleanupTest, "cleanupTest", true, "Cleanup test resources when done")
+	flag.BoolVar(&td.waitForCleanup, "waitForCleanup", false, "Wait for effective deletion of resources")
 
 	flag.BoolVar(&td.kindCluster, "kindCluster", false, "Creates kind cluster")
 	flag.StringVar(&td.clusterName, "kindClusterName", "osm-e2e", "Name of the Kind cluster to be created")
@@ -108,6 +115,8 @@ func InitTestData(t GinkgoTInterface) OsmTestData {
 	td.RestConfig = kubeConfig
 	td.Client = clientset
 
+	td.InitSMIClients()
+
 	return td
 }
 
@@ -117,6 +126,9 @@ type InstallOSMOpts struct {
 	containerRegistryLoc    string
 	containerRegistrySecret string
 	osmImagetag             string
+	deployGrafana           bool
+	deployPrometheus        bool
+	deployJaeger            bool
 }
 
 // GetTestInstallOpts returns Install opts based on test flags
@@ -126,6 +138,9 @@ func (td *OsmTestData) GetTestInstallOpts() InstallOSMOpts {
 		containerRegistryLoc:    td.ctrRegistry,
 		containerRegistrySecret: td.ctrRegistrySercret,
 		osmImagetag:             "latest",
+		deployGrafana:           false,
+		deployPrometheus:        false,
+		deployJaeger:            false,
 	}
 }
 
@@ -138,16 +153,31 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) {
 	args = append(args, "install",
 		"--container-registry="+instOpts.containerRegistryLoc,
 		"--osm-image-tag="+instOpts.osmImagetag,
-		"--namespace="+instOpts.controlPlaneNS)
+		"--namespace="+instOpts.controlPlaneNS,
+		"--enable-debug-server")
 
 	if len(instOpts.containerRegistrySecret) != 0 {
 		args = append(args, "--container-registry-secret="+instOpts.containerRegistrySecret)
 	}
 
+	args = append(args, fmt.Sprintf("--enable-prometheus=%v", instOpts.deployPrometheus))
+	args = append(args, fmt.Sprintf("--enable-grafana=%v", instOpts.deployGrafana))
+	args = append(args, fmt.Sprintf("--deploy-jaeger=%v", instOpts.deployJaeger))
+
 	// Add OSM namespace to cleanup namespaces
 	td.Namespaces[instOpts.controlPlaneNS] = true
 
 	td.RunLocal(filepath.FromSlash("../../bin/osm"), args)
+}
+
+// AddNsToMesh Adds monitored namespaces to the OSM mesh
+func (td *OsmTestData) AddNsToMesh(ns ...string) {
+	td.T.Logf("Adding Namespaces [+%s] to the mesh", ns)
+
+	for _, namespace := range ns {
+		args := []string{"namespace", "add", namespace, "--enable-sidecar-injection", "--namespace=" + td.osmMeshName}
+		td.RunLocal(filepath.FromSlash("../../bin/osm"), args)
+	}
 }
 
 // CreateNs Creates a test NS
@@ -182,11 +212,11 @@ func (td *OsmTestData) DeleteNs(nsName string) error {
 	td.T.Logf("Deleting namespace %v", nsName)
 	err := td.Client.CoreV1().Namespaces().Delete(context.Background(), nsName, metav1.DeleteOptions{PropagationPolicy: &backgroundDelete})
 	if err != nil {
-		td.T.Fatalf("Failed to create namespace: %v", err)
+		td.T.Logf("Failed to delete namespace: %v", err)
 	}
 	delete(td.Namespaces, nsName)
 
-	return nil
+	return err
 }
 
 // WaitForNamespacesDeleted waits for the namespaces to be deleted.
@@ -229,6 +259,76 @@ func (td *OsmTestData) RunLocal(path string, args []string) {
 	}
 }
 
+// RunRemote runs command in remote container
+func (td *OsmTestData) RunRemote(
+	ns string, podName string, containerName string,
+	command string,
+	stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+
+	req := td.Client.CoreV1().RESTClient().Post().Resource("pods").Name(podName).
+		Namespace(ns).SubResource("exec")
+
+	option := &v1.PodExecOptions{
+		Command:   strings.Fields(command),
+		Container: containerName,
+		Stdin:     true,
+		Stdout:    true,
+		Stderr:    true,
+		TTY:       false,
+	}
+	if stdin == nil {
+		option.Stdin = false
+	}
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+
+	req.VersionedParams(
+		option,
+		runtime.NewParameterCodec(scheme),
+	)
+	exec, err := remotecommand.NewSPDYExecutor(td.RestConfig, "POST", req.URL())
+	if err != nil {
+		return err
+	}
+	err = exec.Stream(remotecommand.StreamOptions{
+		Stdin:  stdin,
+		Stdout: stdout,
+		Stderr: stderr,
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// WaitForPodsRunningReady waits for a pods on an NS to be running and ready
+func (td *OsmTestData) WaitForPodsRunningReady(ns string, timeout time.Duration) error {
+	td.T.Logf("Wait for pods ready in ns [%s]...", ns)
+	for start := time.Now(); time.Since(start) < timeout; time.Sleep(2 * time.Second) {
+		pods, err := td.Client.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{})
+		if err != nil || len(pods.Items) == 0 {
+			continue
+		}
+
+		for _, pod := range pods.Items {
+			if pod.Status.Phase != corev1.PodRunning {
+				continue
+			}
+
+			for _, cond := range pod.Status.Conditions {
+				if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+					return nil
+				}
+			}
+		}
+	}
+
+	err := fmt.Errorf("Not all pods were Running & Ready in NS %s after %v", ns, timeout)
+	td.T.Fatalf("%v", err)
+	return err
+}
+
 // Cleanup is Used to cleanup resorces once the test is done
 func (td *OsmTestData) Cleanup() {
 	// In-cluster Test resources cleanup(namespace, crds, specs and whatnot) here
@@ -239,9 +339,11 @@ func (td *OsmTestData) Cleanup() {
 			nsList = append(nsList, ns)
 		}
 
-		err := td.WaitForNamespacesDeleted(nsList, 30*time.Second)
-		if err != nil {
-			td.T.Fatalf("Could not confirm all namespace deletion in time: %v", err)
+		if td.waitForCleanup {
+			err := td.WaitForNamespacesDeleted(nsList, 30*time.Second)
+			if err != nil {
+				td.T.Fatalf("Could not confirm all namespace deletion in time: %v", err)
+			}
 		}
 	}
 
