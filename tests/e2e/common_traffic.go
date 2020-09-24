@@ -23,7 +23,7 @@ func (td *OsmTestData) HTTPRequest(ht HTTPRequestTest) (int, map[string]string, 
 	var stdin, stdout, stderr bytes.Buffer
 
 	// -s silent, -o output to devnull, "-D -" dump headers to file (- stdout), -i Status code
-	command := fmt.Sprintf("/usr/bin/curl -s -o /dev/null -D - -i http://%s.%s:%d/%s", ht.destHostname, ht.destNs, ht.port, ht.httpUrl)
+	command := fmt.Sprintf("/usr/bin/curl -s -o /dev/null -D - -i http://%s.%s:%d%s", ht.destHostname, ht.destNs, ht.port, ht.httpUrl)
 
 	err := td.RunRemote(ht.sourceNs, ht.sourcePod, ht.sourceContainer, command, &stdin, &stdout, &stderr)
 	if err != nil {
