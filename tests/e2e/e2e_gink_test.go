@@ -22,13 +22,10 @@ var _ = Describe("Test and deploy a simple mesh", func() {
 		var ns []string = []string{sourceNs, destNs}
 
 		It("Test testing APIs in a simple e2e test", func() {
-			// Init test
-
 			// For cleanup only while testing, not needed
 			for _, n := range ns {
 				td.Namespaces[n] = true
 			}
-			td.Namespaces[td.osmMeshName] = true
 
 			// Install OSM
 			td.InstallOSM(td.GetTestInstallOpts())

@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 
 	smiSpecs "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/specs/v1alpha3"
 	smiSpecClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/specs/clientset/versioned/typed/specs/v1alpha3"
@@ -46,19 +47,25 @@ func (td *OsmTestData) InitSMIClients() {
 }
 
 // CreateHTTPRouteGroup Creates an SMI Route Group
-func (td *OsmTestData) CreateHTTPRouteGroup(rg smiSpecs.HTTPRouteGroup) {
-	_, err := td.SmiClients.SpecClient.HTTPRouteGroups(td.osmMeshName).Create(context.Background(), &rg, metav1.CreateOptions{})
+func (td *OsmTestData) CreateHTTPRouteGroup(rg smiSpecs.HTTPRouteGroup) (*smiSpecs.HTTPRouteGroup, error) {
+	hrg, err := td.SmiClients.SpecClient.HTTPRouteGroups(td.osmMeshName).Create(context.Background(), &rg, metav1.CreateOptions{})
 	if err != nil {
-		td.T.Fatalf("Error creating HTTP Route Group: %v", err)
+		err := fmt.Errorf("Could not create HTTP Route Group: %v", err)
+		td.T.Fatalf("%v", err)
+		return nil, err
 	}
+	return hrg, nil
 }
 
 // CreateTrafficTarget Creates an SMI TrafficTarget
-func (td *OsmTestData) CreateTrafficTarget(tar smiAccess.TrafficTarget) {
-	_, err := td.SmiClients.AccessClient.TrafficTargets(td.osmMeshName).Create(context.Background(), &tar, metav1.CreateOptions{})
+func (td *OsmTestData) CreateTrafficTarget(tar smiAccess.TrafficTarget) (*smiAccess.TrafficTarget, error) {
+	tt, err := td.SmiClients.AccessClient.TrafficTargets(td.osmMeshName).Create(context.Background(), &tar, metav1.CreateOptions{})
 	if err != nil {
-		td.T.Fatalf("Error creating traffic Target: %v", err)
+		err := fmt.Errorf("Could not create Traffic Target: %v", err)
+		td.T.Fatalf("%v", err)
+		return nil, err
 	}
+	return tt, nil
 }
 
 // SimpleAllowPolicy is a simplified struct to later get basic SMI allow policy
