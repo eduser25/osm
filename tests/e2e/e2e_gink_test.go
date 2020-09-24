@@ -16,12 +16,13 @@ func init() {
 
 var _ = Describe("Test and deploy a simple mesh", func() {
 	Context("Test OSM testing APIs", func() {
-		td.InitTestData(GinkgoT())
+
 		sourceNs := "client"
 		destNs := "server"
 		var ns []string = []string{sourceNs, destNs}
 
 		It("Test testing APIs in a simple e2e test", func() {
+			td.InitTestData(GinkgoT())
 			// For cleanup only while testing, not needed
 			for _, n := range ns {
 				td.Namespaces[n] = true
@@ -29,7 +30,7 @@ var _ = Describe("Test and deploy a simple mesh", func() {
 
 			// Install OSM
 			td.InstallOSM(td.GetTestInstallOpts())
-			td.WaitForPodsRunningReady(td.osmMeshName, 30*time.Second)
+			td.WaitForPodsRunningReady(td.osmMeshName, 40*time.Second)
 
 			// Create Test NS
 			for _, n := range ns {
@@ -37,7 +38,7 @@ var _ = Describe("Test and deploy a simple mesh", func() {
 			}
 
 			// Add Namespaces to mesh
-			td.AddNsToMesh(ns...)
+			td.AddNsToMesh(true, ns...)
 
 			// Get simple pod definitions for the HTTP server
 			svcAccDef, podDef, svcDef := td.SimplePodApp(
@@ -83,8 +84,9 @@ var _ = Describe("Test and deploy a simple mesh", func() {
 					DestinationSvcAccountName: "server",
 				})
 
-			td.CreateHTTPRouteGroup(httpRG)
-			td.CreateTrafficTarget(trafficTarget)
+			// Configs have to be put into a monitored NS, and osm-system can't be by cli
+			td.CreateHTTPRouteGroup(sourceNs, httpRG)
+			td.CreateTrafficTarget(sourceNs, trafficTarget)
 
 			// All ready. Expect client to reach server
 			// Need to get the pod though.
