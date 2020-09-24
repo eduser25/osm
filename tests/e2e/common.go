@@ -86,8 +86,8 @@ func (td *OsmTestData) InitTestData(t GinkgoTInterface) {
 	td.Namespaces = make(map[string]bool)
 
 	if td.kindCluster {
-		td.T.Logf("Creating kind cluster: %s", td.clusterName)
 		td.ClusterProvider = cluster.NewProvider()
+		td.T.Logf("Creating local kind cluster")
 		if err := td.ClusterProvider.Create(td.clusterName); err != nil {
 			td.T.Fatalf("error creating cluster: %v", err)
 		}
@@ -97,6 +97,7 @@ func (td *OsmTestData) InitTestData(t GinkgoTInterface) {
 		clientcmd.NewDefaultClientConfigLoadingRules(),
 		&clientcmd.ConfigOverrides{},
 	)
+
 	kubeConfig, err := clientConfig.ClientConfig()
 	if err != nil {
 		fmt.Println("error loading kube config:", err)
@@ -166,11 +167,15 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) {
 }
 
 // AddNsToMesh Adds monitored namespaces to the OSM mesh
-func (td *OsmTestData) AddNsToMesh(ns ...string) {
+func (td *OsmTestData) AddNsToMesh(sidecardInject bool, ns ...string) {
 	td.T.Logf("Adding Namespaces [+%s] to the mesh", ns)
-
 	for _, namespace := range ns {
-		args := []string{"namespace", "add", namespace, "--enable-sidecar-injection", "--namespace=" + td.osmMeshName}
+		args := []string{"namespace", "add", namespace}
+		if sidecardInject {
+			args = append(args, "--enable-sidecar-injection")
+		}
+
+		args = append(args, "--namespace="+td.osmMeshName)
 		td.RunLocal(filepath.FromSlash("../../bin/osm"), args)
 	}
 }
