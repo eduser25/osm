@@ -4,51 +4,39 @@ import (
 	"context"
 	"fmt"
 
-	smiSpecs "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/specs/v1alpha3"
-	smiSpecClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/specs/clientset/versioned/typed/specs/v1alpha3"
-
 	smiAccess "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/access/v1alpha2"
-	smiAccessClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/access/clientset/versioned/typed/access/v1alpha2"
+	smiSpecs "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/specs/v1alpha3"
+	smiTrafficAccessClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/access/clientset/versioned"
+	smiTrafficSpecClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/specs/clientset/versioned"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // SmiClients Stores various SMI clients
 type SmiClients struct {
-	SpecClient   *smiSpecClient.SpecsV1alpha3Client
-	AccessClient *smiAccessClient.AccessV1alpha2Client
+	SpecClient   *smiTrafficSpecClient.Clientset
+	AccessClient *smiTrafficAccessClient.Clientset
 }
 
 // InitSMIClients is called to initialize SMI clients
 func (td *OsmTestData) InitSMIClients() {
 	td.SmiClients = &SmiClients{}
+	var err error
 
-	// Confirmed you need a different RESTconfig per client
-	// https://github.com/kubernetes/apiextensions-apiserver/issues/32
-	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		clientcmd.NewDefaultClientConfigLoadingRules(),
-		&clientcmd.ConfigOverrides{},
-	)
-	kubeConfig, err := clientConfig.ClientConfig()
-	if err != nil {
-		td.T.Fatalf("Failed to get Rest config")
-	}
-
-	td.SmiClients.SpecClient, err = smiSpecClient.NewForConfig(kubeConfig)
+	td.SmiClients.SpecClient, err = smiTrafficSpecClient.NewForConfig(td.RestConfig)
 	if err != nil {
 		td.T.Fatalf("Failed to get SmiSpecClient for SMI: %v", err)
 	}
 
-	td.SmiClients.AccessClient, err = smiAccessClient.NewForConfig(kubeConfig)
+	td.SmiClients.AccessClient, err = smiTrafficAccessClient.NewForConfig(td.RestConfig)
 	if err != nil {
 		td.T.Fatalf("Failed to get AccessClient for SMI: %v", err)
 	}
 }
 
 // CreateHTTPRouteGroup Creates an SMI Route Group
-func (td *OsmTestData) CreateHTTPRouteGroup(rg smiSpecs.HTTPRouteGroup) (*smiSpecs.HTTPRouteGroup, error) {
-	hrg, err := td.SmiClients.SpecClient.HTTPRouteGroups(td.osmMeshName).Create(context.Background(), &rg, metav1.CreateOptions{})
+func (td *OsmTestData) CreateHTTPRouteGroup(ns string, rg smiSpecs.HTTPRouteGroup) (*smiSpecs.HTTPRouteGroup, error) {
+	hrg, err := td.SmiClients.SpecClient.SpecsV1alpha3().HTTPRouteGroups(ns).Create(context.Background(), &rg, metav1.CreateOptions{})
 	if err != nil {
 		err := fmt.Errorf("Could not create HTTP Route Group: %v", err)
 		td.T.Fatalf("%v", err)
@@ -58,8 +46,8 @@ func (td *OsmTestData) CreateHTTPRouteGroup(rg smiSpecs.HTTPRouteGroup) (*smiSpe
 }
 
 // CreateTrafficTarget Creates an SMI TrafficTarget
-func (td *OsmTestData) CreateTrafficTarget(tar smiAccess.TrafficTarget) (*smiAccess.TrafficTarget, error) {
-	tt, err := td.SmiClients.AccessClient.TrafficTargets(td.osmMeshName).Create(context.Background(), &tar, metav1.CreateOptions{})
+func (td *OsmTestData) CreateTrafficTarget(ns string, tar smiAccess.TrafficTarget) (*smiAccess.TrafficTarget, error) {
+	tt, err := td.SmiClients.AccessClient.AccessV1alpha2().TrafficTargets(ns).Create(context.Background(), &tar, metav1.CreateOptions{})
 	if err != nil {
 		err := fmt.Errorf("Could not create Traffic Target: %v", err)
 		td.T.Fatalf("%v", err)
