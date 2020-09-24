@@ -38,6 +38,7 @@ type OsmTestData struct {
 	osmMeshName        string
 	ctrRegistry        string
 	ctrRegistrySercret string
+	osmImageTag        string
 
 	kindCluster        bool   // Create and use a kind cluster
 	clusterName        string // Kind cluster name (used if kindCluster)
@@ -64,6 +65,8 @@ func registerFlags(td *OsmTestData) {
 	flag.StringVar(&td.ctrRegistry, "containerRegistry", os.Getenv("CTR_REGISTRY"), "Container registry")
 	flag.StringVar(&td.ctrRegistrySercret, "containerRegistrySecret", os.Getenv("CTR_REGISTRY_PASSWORD"), "Container registry secret")
 
+	flag.StringVar(&td.osmImageTag, "osmImageTag", "latest", "OSM image tag")
+
 	flag.StringVar(&td.osmMeshName, "meshName", func() string {
 		tmp := os.Getenv("K8S_NAMESPACE")
 		if len(tmp) != 0 {
@@ -79,7 +82,6 @@ func registerFlags(td *OsmTestData) {
 
 // InitTestData Initializes the test structures
 func (td *OsmTestData) InitTestData(t GinkgoTInterface) {
-	// Parse Generic test flags
 	td.T = t
 	td.Namespaces = make(map[string]bool)
 
@@ -130,7 +132,7 @@ func (td *OsmTestData) GetTestInstallOpts() InstallOSMOpts {
 		controlPlaneNS:          td.osmMeshName,
 		containerRegistryLoc:    td.ctrRegistry,
 		containerRegistrySecret: td.ctrRegistrySercret,
-		osmImagetag:             "latest",
+		osmImagetag:             td.osmImageTag,
 		deployGrafana:           false,
 		deployPrometheus:        false,
 		deployJaeger:            false,
@@ -142,6 +144,9 @@ func (td *OsmTestData) GetTestInstallOpts() InstallOSMOpts {
 func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) {
 	td.T.Log("Installing OSM")
 	var args []string
+
+	// Add OSM namespace to cleanup namespaces, in case the test can't init
+	td.Namespaces[instOpts.controlPlaneNS] = true
 
 	args = append(args, "install",
 		"--container-registry="+instOpts.containerRegistryLoc,
@@ -156,9 +161,6 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) {
 	args = append(args, fmt.Sprintf("--enable-prometheus=%v", instOpts.deployPrometheus))
 	args = append(args, fmt.Sprintf("--enable-grafana=%v", instOpts.deployGrafana))
 	args = append(args, fmt.Sprintf("--deploy-jaeger=%v", instOpts.deployJaeger))
-
-	// Add OSM namespace to cleanup namespaces
-	td.Namespaces[instOpts.controlPlaneNS] = true
 
 	td.RunLocal(filepath.FromSlash("../../bin/osm"), args)
 }
