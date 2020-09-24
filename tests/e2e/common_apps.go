@@ -11,14 +11,14 @@ import (
 )
 
 // CreateServiceAccount creates a service account
-func (td *OsmTestData) CreateServiceAccount(ns string, svcAccount *corev1.ServiceAccount) error {
-	_, err := td.Client.CoreV1().ServiceAccounts(ns).Create(context.Background(), svcAccount, metav1.CreateOptions{})
+func (td *OsmTestData) CreateServiceAccount(ns string, svcAccount *corev1.ServiceAccount) (*corev1.ServiceAccount, error) {
+	svcAc, err := td.Client.CoreV1().ServiceAccounts(ns).Create(context.Background(), svcAccount, metav1.CreateOptions{})
 	if err != nil {
 		err := fmt.Errorf("Could not create Service Account: %v", err)
 		td.T.Fatalf("%v", err)
-		return err
+		return nil, err
 	}
-	return nil
+	return svcAc, nil
 }
 
 // CreatePod creates a pod
@@ -33,14 +33,14 @@ func (td *OsmTestData) CreatePod(ns string, pod corev1.Pod) (*corev1.Pod, error)
 }
 
 // CreateService a service
-func (td *OsmTestData) CreateService(ns string, svc corev1.Service) error {
-	_, err := td.Client.CoreV1().Services(ns).Create(context.Background(), &svc, metav1.CreateOptions{})
+func (td *OsmTestData) CreateService(ns string, svc corev1.Service) (*corev1.Service, error) {
+	sv, err := td.Client.CoreV1().Services(ns).Create(context.Background(), &svc, metav1.CreateOptions{})
 	if err != nil {
 		err := fmt.Errorf("Could not create Service: %v", err)
 		td.T.Fatalf("%v", err)
-		return err
+		return nil, err
 	}
-	return nil
+	return sv, nil
 }
 
 // Strightforward Templates below
