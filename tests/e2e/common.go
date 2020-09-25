@@ -5,7 +5,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -262,8 +261,8 @@ func (td *OsmTestData) RunLocal(path string, args []string) {
 // RunRemote runs command in remote container
 func (td *OsmTestData) RunRemote(
 	ns string, podName string, containerName string,
-	command string,
-	stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	command string) (string, string, error) {
+	var stdin, stdout, stderr bytes.Buffer
 
 	req := td.Client.CoreV1().RESTClient().Post().Resource("pods").Name(podName).
 		Namespace(ns).SubResource("exec")
@@ -276,9 +275,7 @@ func (td *OsmTestData) RunRemote(
 		Stderr:    true,
 		TTY:       false,
 	}
-	if stdin == nil {
-		option.Stdin = false
-	}
+
 	scheme := runtime.NewScheme()
 	corev1.AddToScheme(scheme)
 
@@ -288,18 +285,18 @@ func (td *OsmTestData) RunRemote(
 	)
 	exec, err := remotecommand.NewSPDYExecutor(td.RestConfig, "POST", req.URL())
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	err = exec.Stream(remotecommand.StreamOptions{
-		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
+		Stdin:  &stdin,
+		Stdout: &stdout,
+		Stderr: &stderr,
 	})
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
-	return nil
+	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), nil
 }
 
 // WaitForPodsRunningReady waits for a pods on an NS to be running and ready
@@ -327,6 +324,30 @@ func (td *OsmTestData) WaitForPodsRunningReady(ns string, timeout time.Duration)
 	err := fmt.Errorf("Not all pods were Running & Ready in NS %s after %v", ns, timeout)
 	td.T.Fatalf("%v", err)
 	return err
+}
+
+// SuccessFunction is a simple definiton for a success function.
+// True as success, false otherwise
+type SuccessFunction func() bool
+
+// WaitForRepeatedSuccess runs and expects a certain result for a certain operation a set number of consecutive times
+// over a set amount of time.
+func WaitForRepeatedSuccess(f SuccessFunction, minItForSuccess int, maxWaitTime time.Duration) bool {
+	iterations := 0
+	startTime := time.Now()
+
+	for time.Since(startTime) < maxWaitTime {
+		if f() {
+			iterations++
+			if iterations >= minItForSuccess {
+				return true
+			}
+		} else {
+			iterations = 0
+		}
+		time.Sleep(time.Second)
+	}
+	return false
 }
 
 // Cleanup is Used to cleanup resorces once the test is done
