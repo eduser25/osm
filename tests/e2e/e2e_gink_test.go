@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -90,21 +91,26 @@ var _ = Describe("Test and deploy a simple mesh", func() {
 
 			// All ready. Expect client to reach server
 			// Need to get the pod though.
-			for true {
-				td.HTTPRequest(HTTPRequestTest{
-					sourceNs:        srcPod.Namespace,
-					sourcePod:       srcPod.Name,
-					sourceContainer: "client", // We can do better
+			WaitForRepeatedSuccess(func() bool {
+				statusCode, _, err :=
+					td.HTTPRequest(HTTPRequestDef{
+						SourceNs:        srcPod.Namespace,
+						SourcePod:       srcPod.Name,
+						SourceContainer: "client", // We can do better
 
-					destHostname: "server",
-					destNs:       dstPod.Namespace,
+						Destination: fmt.Sprintf("%s.%s", dstPod.Name, dstPod.Namespace),
 
-					httpUrl: "/",
-					port:    80,
-				})
-				time.Sleep(2 * time.Second)
-			}
+						HTTPUrl: "/",
+						Port:    80,
+					})
 
+				if err != nil || statusCode != 200 {
+					td.T.Logf("> REST req failed (status: %d) %v", statusCode, err)
+					return false
+				}
+				td.T.Logf("> REST req succeeded: %d", statusCode)
+				return true
+			}, 5, 40*time.Second)
 		})
 	})
 
