@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	// HStatusCodeWord is a hardcoded word to use on curl command, to print and parse REST Status code
+	// StatusCodeWord is a hardcoded word to use on curl command, to print and parse REST Status code
 	StatusCodeWord = "StatusCode"
 )
 
@@ -24,10 +24,11 @@ type HTTPRequestDef struct {
 	Port    int
 }
 
-// HTTPRequest runs a basic HTTP resquest from the source container to the expected destination
+// HTTPRequest runs a basic HTTP resquest from the source ns/pod/container to the a given host destination
+// Returns Status code, map with HTTP headers and error if any
 func (td *OsmTestData) HTTPRequest(ht HTTPRequestDef) (int, map[string]string, error) {
 	// -s silent progress, -o output to devnull, '-D -' dump headers to "-" (stdout), -i Status code
-	// -I skip body download, '-w StatusCode:%{http_code}' prints Status code label-liked for easy parsing
+	// -I skip body download, '-w StatusCode:%{http_code}' prints Status code label-like for easy parsing
 	command := fmt.Sprintf("/usr/bin/curl -s -o /dev/null -D - -I -w %s:%%{http_code} http://%s:%d%s", StatusCodeWord, ht.Destination, ht.Port, ht.HTTPUrl)
 
 	td.T.Logf("- (Curl) HTTP GET %s/%s[%s] -> http://%s:%d%s", ht.SourceNs, ht.SourcePod, ht.SourceContainer, ht.Destination, ht.Port, ht.HTTPUrl)

@@ -7,31 +7,16 @@ import (
 	. "github.com/onsi/ginkgo"
 )
 
-// Since parseFlags is global, this is the Ginkgo way to do it. Cant help it.
-// https://github.com/onsi/ginkgo/issues/265
-var td OsmTestData
-
-func init() {
-	registerFlags(&td)
-}
-
-var _ = Describe("Test and deploy a simple mesh", func() {
-	Context("Test OSM testing APIs", func() {
-
+var _ = Describe("Simple Client-Server pod test", func() {
+	Context("SimpleClientServer", func() {
 		sourceNs := "client"
 		destNs := "server"
 		var ns []string = []string{sourceNs, destNs}
 
-		It("Test testing APIs in a simple e2e test", func() {
-			td.InitTestData(GinkgoT())
-			// For cleanup only while testing, not needed
-			for _, n := range ns {
-				td.Namespaces[n] = true
-			}
-
+		It("Tests HTTP traffic for a simple client-server pod deployment", func() {
 			// Install OSM
 			td.InstallOSM(td.GetTestInstallOpts())
-			td.WaitForPodsRunningReady(td.osmMeshName, 40*time.Second)
+			td.WaitForPodsRunningReady(td.osmMeshName, 60*time.Second)
 
 			// Create Test NS
 			for _, n := range ns {
@@ -54,7 +39,7 @@ var _ = Describe("Test and deploy a simple mesh", func() {
 			td.CreateService(destNs, svcDef)
 
 			// Expect it to be up and running in it's receiver namespace
-			td.WaitForPodsRunningReady(destNs, 30*time.Second)
+			td.WaitForPodsRunningReady(destNs, 60*time.Second)
 
 			// Get simple Pod definitions for the client
 			svcAccDef, podDef, svcDef = td.SimplePodApp(SimplePodAppDef{
@@ -70,7 +55,7 @@ var _ = Describe("Test and deploy a simple mesh", func() {
 			td.CreateService(sourceNs, svcDef)
 
 			// Expect it to be up and running in it's receiver namespace
-			td.WaitForPodsRunningReady(sourceNs, 30*time.Second)
+			td.WaitForPodsRunningReady(sourceNs, 60*time.Second)
 
 			// Deploy allow rule client->server
 			httpRG, trafficTarget := td.CreateSimpleAllowPolicy(
@@ -110,12 +95,7 @@ var _ = Describe("Test and deploy a simple mesh", func() {
 				}
 				td.T.Logf("> REST req succeeded: %d", statusCode)
 				return true
-			}, 5, 40*time.Second)
+			}, 5, 60*time.Second)
 		})
-	})
-
-	// Cleanup when error
-	AfterSuite(func() {
-		td.Cleanup()
 	})
 })
