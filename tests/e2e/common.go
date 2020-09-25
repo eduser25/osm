@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/client"
 	"github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo"
-
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,6 +24,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/kind/pkg/cluster"
+	"sigs.k8s.io/kind/pkg/cluster/nodeutils"
 )
 
 // OsmTestData stores common state and variables and flags of a test
@@ -73,16 +74,16 @@ func registerFlags(td *OsmTestData) {
 		}
 		return "osm-system"
 	}(), "OSM mesh name")
-
-	if len(td.ctrRegistry) == 0 {
-		td.T.Log("warn: did not read any container registry")
-	}
 }
 
 // InitTestData Initializes the test structures
 func (td *OsmTestData) InitTestData(t GinkgoTInterface) {
 	td.T = t
 	td.Namespaces = make(map[string]bool)
+
+	if len(td.ctrRegistry) == 0 {
+		td.T.Log("warn: did not read any container registry")
+	}
 
 	if td.kindCluster {
 		td.ClusterProvider = cluster.NewProvider()
@@ -142,6 +143,38 @@ func (td *OsmTestData) GetTestInstallOpts() InstallOSMOpts {
 // InstallOSM installs OSM. Right now relies on externally calling the binary and a subset of possible opts
 // TODO: refactor install to be able to call it directly here vs. exec-ing CLI.
 func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) {
+	if td.kindCluster {
+		td.T.Log("Getting image data")
+		imageNames := []string{
+			"osm-controller",
+			"init",
+		}
+		docker, err := client.NewClientWithOpts(client.WithAPIVersionNegotiation())
+		if err != nil {
+			td.T.Fatal("error creating docker client:", err)
+		}
+		var imageIDs []string
+		for _, name := range imageNames {
+			imageName := fmt.Sprintf("%s/%s:%s", td.ctrRegistry, name, td.osmImageTag)
+			imageIDs = append(imageIDs, imageName)
+		}
+		imageData, err := docker.ImageSave(context.TODO(), imageIDs)
+		if err != nil {
+			td.T.Fatal("error getting image data:", err)
+		}
+		defer imageData.Close()
+		nodes, err := td.ClusterProvider.ListNodes(td.clusterName)
+		if err != nil {
+			td.T.Fatal("error listing kind nodes:", err)
+		}
+		for _, n := range nodes {
+			td.T.Log("Loading images onto node", n)
+			if err := nodeutils.LoadImageArchive(n, imageData); err != nil {
+				td.T.Fatal("error loading image:", err)
+			}
+		}
+	}
+
 	td.T.Log("Installing OSM")
 	var args []string
 
