@@ -40,9 +40,10 @@ type OsmTestData struct {
 	ctrRegistrySercret string
 	osmImageTag        string
 
-	kindCluster        bool   // Create and use a kind cluster
-	clusterName        string // Kind cluster name (used if kindCluster)
-	cleanupKindCluster bool   // Cleanup kind cluster upon test finish
+	kindCluster                    bool   // Create and use a kind cluster
+	clusterName                    string // Kind cluster name (used if kindCluster)
+	cleanupKindClusterBetweenTests bool   // Clean and re-create kind cluster between tests
+	cleanupKindCluster             bool   // Cleanup kind cluster upon test finish
 
 	// Cluster handles and rest config
 	RestConfig      *rest.Config
@@ -56,11 +57,12 @@ type OsmTestData struct {
 
 func registerFlags(td *OsmTestData) {
 	flag.BoolVar(&td.cleanupTest, "cleanupTest", true, "Cleanup test resources when done")
-	flag.BoolVar(&td.waitForCleanup, "waitForCleanup", false, "Wait for effective deletion of resources")
+	flag.BoolVar(&td.waitForCleanup, "waitForCleanup", true, "Wait for effective deletion of resources")
 
 	flag.BoolVar(&td.kindCluster, "kindCluster", false, "Creates kind cluster")
 	flag.StringVar(&td.clusterName, "kindClusterName", "osm-e2e", "Name of the Kind cluster to be created")
 	flag.BoolVar(&td.cleanupKindCluster, "cleanupKindCluster", true, "Cleanup kind cluster upon exit")
+	flag.BoolVar(&td.cleanupKindClusterBetweenTests, "cleanupKindClusterBetweenTests", true, "Cleanup kind cluster between tests")
 
 	flag.StringVar(&td.ctrRegistry, "containerRegistry", os.Getenv("CTR_REGISTRY"), "Container registry")
 	flag.StringVar(&td.ctrRegistrySercret, "containerRegistrySecret", os.Getenv("CTR_REGISTRY_PASSWORD"), "Container registry secret")
@@ -85,7 +87,7 @@ func (td *OsmTestData) InitTestData(t GinkgoTInterface) {
 		td.T.Log("warn: did not read any container registry")
 	}
 
-	if td.kindCluster {
+	if td.kindCluster && td.ClusterProvider == nil {
 		td.ClusterProvider = cluster.NewProvider()
 		td.T.Logf("Creating local kind cluster")
 		if err := td.ClusterProvider.Create(td.clusterName); err != nil {
@@ -114,6 +116,11 @@ func (td *OsmTestData) InitTestData(t GinkgoTInterface) {
 	td.Client = clientset
 
 	td.InitSMIClients()
+
+	// After client creations, do a wait for kind cluster just in case it's not done yet coming up
+	if td.kindCluster && td.ClusterProvider != nil {
+		td.WaitForPodsRunningReady("kube-system", 60*time.Second)
+	}
 }
 
 // InstallOSMOpts describes install options for OSM
@@ -281,7 +288,7 @@ func (td *OsmTestData) RunLocal(path string, args []string) {
 	cmd.Stdout = bytes.NewBuffer(nil)
 	cmd.Stderr = bytes.NewBuffer(nil)
 
-	td.T.Logf("running '%s %s'", path, strings.Join(args, " "))
+	td.T.Logf("Running locally '%s %s'", path, strings.Join(args, " "))
 	if err := cmd.Run(); err != nil {
 		td.T.Logf("error running cmd '%s %s' : %v",
 			path, strings.Join(args, " "), err)
@@ -383,8 +390,18 @@ func WaitForRepeatedSuccess(f SuccessFunction, minItForSuccess int, maxWaitTime 
 	return false
 }
 
+// CleanupType identifies what triggered the cleanup
+type CleanupType string
+
+const (
+	// Test is to mark after-test cleanup
+	Test CleanupType = "test"
+	//Suite is to mark after-suite cleanup
+	Suite CleanupType = "suite"
+)
+
 // Cleanup is Used to cleanup resorces once the test is done
-func (td *OsmTestData) Cleanup() {
+func (td *OsmTestData) Cleanup(ct CleanupType) {
 	// In-cluster Test resources cleanup(namespace, crds, specs and whatnot) here
 	if td.cleanupTest {
 		var nsList []string
@@ -393,19 +410,24 @@ func (td *OsmTestData) Cleanup() {
 			nsList = append(nsList, ns)
 		}
 
-		if td.waitForCleanup {
-			err := td.WaitForNamespacesDeleted(nsList, 30*time.Second)
+		if len(nsList) > 0 && td.waitForCleanup {
+			// on kind this can take a while apparently
+			err := td.WaitForNamespacesDeleted(nsList, 120*time.Second)
 			if err != nil {
-				td.T.Fatalf("Could not confirm all namespace deletion in time: %v", err)
+				td.T.Logf("Could not confirm all namespace deletion in time: %v", err)
 			}
 		}
+		td.Namespaces = map[string]bool{}
 	}
 
 	// Kind cluster deletion, if needed
-	if td.kindCluster && td.cleanupKindCluster {
-		td.T.Logf("Deleting kind cluster: %s", td.clusterName)
-		if err := td.ClusterProvider.Delete(td.clusterName, clientcmd.RecommendedHomeFile); err != nil {
-			td.T.Errorf("error deleting cluster: %v", err)
+	if td.kindCluster && td.ClusterProvider != nil {
+		if ct == Test && td.cleanupKindClusterBetweenTests || ct == Suite && td.cleanupKindCluster {
+			td.T.Logf("Deleting kind cluster: %s", td.clusterName)
+			if err := td.ClusterProvider.Delete(td.clusterName, clientcmd.RecommendedHomeFile); err != nil {
+				td.T.Errorf("error deleting cluster: %v", err)
+			}
+			td.ClusterProvider = nil
 		}
 	}
 }
