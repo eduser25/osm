@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +33,17 @@ func (td *OsmTestData) CreatePod(ns string, pod corev1.Pod) (*corev1.Pod, error)
 	return podRet, nil
 }
 
+// CreateDeployment creates a pod
+func (td *OsmTestData) CreateDeployment(ns string, deployment appsv1.Deployment) (*appsv1.Deployment, error) {
+	deploymentRet, err := td.Client.AppsV1().Deployments(ns).Create(context.Background(), &deployment, metav1.CreateOptions{})
+	if err != nil {
+		err := fmt.Errorf("Could not create Deployment: %v", err)
+		td.T.Fatalf("%v", err)
+		return nil, err
+	}
+	return deploymentRet, nil
+}
+
 // CreateService a service
 func (td *OsmTestData) CreateService(ns string, svc corev1.Service) (*corev1.Service, error) {
 	sv, err := td.Client.CoreV1().Services(ns).Create(context.Background(), &svc, metav1.CreateOptions{})
@@ -56,7 +68,7 @@ type SimplePodAppDef struct {
 	args      []string
 }
 
-// SimplePodApp creates some templated HTTP server App for testing
+// SimplePodApp creates a template for a Pod-based app definition for testing
 func (td *OsmTestData) SimplePodApp(def SimplePodAppDef) (corev1.ServiceAccount, corev1.Pod, corev1.Service) {
 	serviceAccountDefinition := corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
@@ -75,8 +87,9 @@ func (td *OsmTestData) SimplePodApp(def SimplePodAppDef) (corev1.ServiceAccount,
 			ServiceAccountName: def.name,
 			Containers: []corev1.Container{
 				{
-					Name:  def.name,
-					Image: def.image,
+					Name:            def.name,
+					Image:           def.image,
+					ImagePullPolicy: corev1.PullIfNotPresent,
 					Ports: []corev1.ContainerPort{
 						{
 							ContainerPort: 80,
@@ -120,4 +133,93 @@ func (td *OsmTestData) SimplePodApp(def SimplePodAppDef) (corev1.ServiceAccount,
 	}
 
 	return serviceAccountDefinition, podDefinition, serviceDefinition
+}
+
+type SimpleDeploymentAppDef struct {
+	namespace    string
+	name         string
+	image        string
+	replicaCount int32
+	command      []string
+	args         []string
+}
+
+// SimpleDeploymentApp creates a template for a deployment-based app definition for testing
+func (td *OsmTestData) SimpleDeploymentApp(def SimpleDeploymentAppDef) (corev1.ServiceAccount, appsv1.Deployment, corev1.Service) {
+	serviceAccountDefinition := corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      def.name,
+			Namespace: def.namespace,
+		},
+	}
+
+	// Required, as replica count is a pointer to distinguish between 0 and not specified
+	replicaCountExplicitDeclaration := def.replicaCount
+
+	deploymentDefinition := appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      def.name,
+			Namespace: def.namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicaCountExplicitDeclaration,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": def.name,
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app": def.name,
+					},
+				},
+				Spec: corev1.PodSpec{
+					ServiceAccountName: def.name,
+					Containers: []corev1.Container{
+						{
+							Name:            def.name,
+							Image:           def.image,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Ports: []corev1.ContainerPort{
+								{
+									ContainerPort: 80,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if def.command != nil && len(def.command) > 0 {
+		deploymentDefinition.Spec.Template.Spec.Containers[0].Command = def.command
+	}
+	if def.args != nil && len(def.args) > 0 {
+		deploymentDefinition.Spec.Template.Spec.Containers[0].Args = def.args
+	}
+
+	serviceDefinition := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      def.name,
+			Namespace: def.namespace,
+			Labels: map[string]string{
+				"app": def.name,
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app": def.name,
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Port:       80,
+					TargetPort: intstr.FromInt(80),
+				},
+			},
+		},
+	}
+
+	return serviceAccountDefinition, deploymentDefinition, serviceDefinition
 }
