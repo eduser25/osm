@@ -14,6 +14,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo"
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,7 +80,7 @@ func registerFlags(td *OsmTestData) {
 }
 
 // InitTestData Initializes the test structures
-func (td *OsmTestData) InitTestData(t GinkgoTInterface) {
+func (td *OsmTestData) InitTestData(t GinkgoTInterface) error {
 	td.T = t
 	td.Namespaces = make(map[string]bool)
 
@@ -91,7 +92,7 @@ func (td *OsmTestData) InitTestData(t GinkgoTInterface) {
 		td.ClusterProvider = cluster.NewProvider()
 		td.T.Logf("Creating local kind cluster")
 		if err := td.ClusterProvider.Create(td.clusterName); err != nil {
-			td.T.Fatalf("error creating cluster: %v", err)
+			return errors.Wrap(err, "failed to create kind cluster")
 		}
 	}
 
@@ -102,26 +103,30 @@ func (td *OsmTestData) InitTestData(t GinkgoTInterface) {
 
 	kubeConfig, err := clientConfig.ClientConfig()
 	if err != nil {
-		fmt.Println("error loading kube config:", err)
-		os.Exit(1)
+		return errors.Wrap(err, "failed to get Kubernetes config")
 	}
 
 	clientset, err := kubernetes.NewForConfig(kubeConfig)
 	if err != nil {
-		fmt.Println("error in getting access to K8S")
-		os.Exit(1)
+		return errors.Wrap(err, "failed to create Kubernetes client")
 	}
 
 	td.RestConfig = kubeConfig
 	td.Client = clientset
 
-	td.InitSMIClients()
+	if err := td.InitSMIClients(); err != nil {
+		return errors.Wrap(err, "failed to initialize SMI clients")
+	}
 
 	// After client creations, do a wait for kind cluster just in case it's not done yet coming up
 	// Ballparking number. kind has a large number of containers to run by default
 	if td.kindCluster && td.ClusterProvider != nil {
-		td.WaitForPodsRunningReady("kube-system", 60*time.Second, 5)
+		if err := td.WaitForPodsRunningReady("kube-system", 60*time.Second, 5); err != nil {
+			return errors.Wrap(err, "failed to wait for kube-system pods")
+		}
 	}
+
+	return nil
 }
 
 // InstallOSMOpts describes install options for OSM
@@ -150,7 +155,7 @@ func (td *OsmTestData) GetTestInstallOpts() InstallOSMOpts {
 
 // InstallOSM installs OSM. Right now relies on externally calling the binary and a subset of possible opts
 // TODO: refactor install to be able to call it directly here vs. exec-ing CLI.
-func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) {
+func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) error {
 	if td.kindCluster {
 		td.T.Log("Getting image data")
 		imageNames := []string{
@@ -159,7 +164,7 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) {
 		}
 		docker, err := client.NewClientWithOpts(client.WithAPIVersionNegotiation())
 		if err != nil {
-			td.T.Fatal("error creating docker client:", err)
+			return errors.Wrap(err, "failed to create docker client")
 		}
 		var imageIDs []string
 		for _, name := range imageNames {
@@ -168,17 +173,17 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) {
 		}
 		imageData, err := docker.ImageSave(context.TODO(), imageIDs)
 		if err != nil {
-			td.T.Fatal("error getting image data:", err)
+			return errors.Wrap(err, "failed to get image data")
 		}
 		defer imageData.Close()
 		nodes, err := td.ClusterProvider.ListNodes(td.clusterName)
 		if err != nil {
-			td.T.Fatal("error listing kind nodes:", err)
+			return errors.Wrap(err, "failed to list kind nodes")
 		}
 		for _, n := range nodes {
 			td.T.Log("Loading images onto node", n)
 			if err := nodeutils.LoadImageArchive(n, imageData); err != nil {
-				td.T.Fatal("error loading image:", err)
+				return errors.Wrap(err, "failed to load images")
 			}
 		}
 	}
@@ -203,11 +208,19 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) {
 	args = append(args, fmt.Sprintf("--enable-grafana=%v", instOpts.deployGrafana))
 	args = append(args, fmt.Sprintf("--deploy-jaeger=%v", instOpts.deployJaeger))
 
-	td.RunLocal(filepath.FromSlash("../../bin/osm"), args)
+	stdout, stderr, err := td.RunLocal(filepath.FromSlash("../../bin/osm"), args)
+	if err != nil {
+		td.T.Logf("error running osm install")
+		td.T.Logf("stdout:\n%s", stdout)
+		td.T.Logf("stderr:\n%s", stderr)
+		return errors.Wrap(err, "failed to run osm install")
+	}
+
+	return nil
 }
 
 // AddNsToMesh Adds monitored namespaces to the OSM mesh
-func (td *OsmTestData) AddNsToMesh(sidecardInject bool, ns ...string) {
+func (td *OsmTestData) AddNsToMesh(sidecardInject bool, ns ...string) error {
 	td.T.Logf("Adding Namespaces [+%s] to the mesh", ns)
 	for _, namespace := range ns {
 		args := []string{"namespace", "add", namespace}
@@ -216,8 +229,15 @@ func (td *OsmTestData) AddNsToMesh(sidecardInject bool, ns ...string) {
 		}
 
 		args = append(args, "--namespace="+td.osmMeshName)
-		td.RunLocal(filepath.FromSlash("../../bin/osm"), args)
+		stdout, stderr, err := td.RunLocal(filepath.FromSlash("../../bin/osm"), args)
+		if err != nil {
+			td.T.Logf("error running osm namespace add")
+			td.T.Logf("stdout:\n%s", stdout)
+			td.T.Logf("stderr:\n%s", stderr)
+			return errors.Wrap(err, "failed to run osm namespace add")
+		}
 	}
+	return nil
 }
 
 // CreateNs Creates a test NS
@@ -238,7 +258,7 @@ func (td *OsmTestData) CreateNs(nsName string, labels map[string]string) error {
 	td.T.Logf("Creating namespace %v", nsName)
 	_, err := td.Client.CoreV1().Namespaces().Create(context.Background(), namespaceObj, metav1.CreateOptions{})
 	if err != nil {
-		td.T.Fatalf("Failed to create namespace: %v", err)
+		return errors.Wrap(err, "failed to create namespace "+nsName)
 	}
 	td.Namespaces[nsName] = true
 
@@ -251,12 +271,11 @@ func (td *OsmTestData) DeleteNs(nsName string) error {
 
 	td.T.Logf("Deleting namespace %v", nsName)
 	err := td.Client.CoreV1().Namespaces().Delete(context.Background(), nsName, metav1.DeleteOptions{PropagationPolicy: &backgroundDelete})
-	if err != nil {
-		td.T.Logf("Failed to delete namespace: %v", err)
-	}
 	delete(td.Namespaces, nsName)
-
-	return err
+	if err != nil {
+		return errors.Wrap(err, "failed to delete namespace "+nsName)
+	}
+	return nil
 }
 
 // WaitForNamespacesDeleted waits for the namespaces to be deleted.
@@ -284,19 +303,16 @@ func (td *OsmTestData) WaitForNamespacesDeleted(namespaces []string, timeout tim
 }
 
 // RunLocal Executes command on local
-func (td *OsmTestData) RunLocal(path string, args []string) {
+func (td *OsmTestData) RunLocal(path string, args []string) (*bytes.Buffer, *bytes.Buffer, error) {
 	cmd := exec.Command(path, args...)
-	cmd.Stdout = bytes.NewBuffer(nil)
-	cmd.Stderr = bytes.NewBuffer(nil)
+	stdout := bytes.NewBuffer(nil)
+	stderr := bytes.NewBuffer(nil)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	td.T.Logf("Running locally '%s %s'", path, strings.Join(args, " "))
-	if err := cmd.Run(); err != nil {
-		td.T.Logf("error running cmd '%s %s' : %v",
-			path, strings.Join(args, " "), err)
-		td.T.Logf("stdout: %s\n", cmd.Stdout)
-		td.T.Logf("stderr: %s\n", cmd.Stderr)
-		td.T.FailNow()
-	}
+	err := cmd.Run()
+	return stdout, stderr, err
 }
 
 // RunRemote runs command in remote container
@@ -349,7 +365,7 @@ func (td *OsmTestData) WaitForPodsRunningReady(ns string, timeout time.Duration,
 		})
 
 		if err != nil {
-			td.T.Fatalf("Error running List Pods: %v", err)
+			return errors.Wrap(err, "failed to list pods")
 		}
 
 		if len(pods.Items) < nExpectedRunningPods {
@@ -371,9 +387,7 @@ func (td *OsmTestData) WaitForPodsRunningReady(ns string, timeout time.Duration,
 		time.Sleep(1)
 	}
 
-	err := fmt.Errorf("Not all pods were Running & Ready in NS %s after %v", ns, timeout)
-	td.T.Fatalf("%v", err)
-	return err
+	return fmt.Errorf("Not all pods were Running & Ready in NS %s after %v", ns, timeout)
 }
 
 // SuccessFunction is a simple definiton for a success function.
@@ -435,7 +449,7 @@ func (td *OsmTestData) Cleanup(ct CleanupType) {
 		if ct == Test && td.cleanupKindClusterBetweenTests || ct == Suite && td.cleanupKindCluster {
 			td.T.Logf("Deleting kind cluster: %s", td.clusterName)
 			if err := td.ClusterProvider.Delete(td.clusterName, clientcmd.RecommendedHomeFile); err != nil {
-				td.T.Errorf("error deleting cluster: %v", err)
+				td.T.Logf("error deleting cluster: %v", err)
 			}
 			td.ClusterProvider = nil
 		}

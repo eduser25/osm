@@ -5,6 +5,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Simple Client-Server pod test", func() {
@@ -15,12 +16,12 @@ var _ = Describe("Simple Client-Server pod test", func() {
 
 		It("Tests HTTP traffic for a simple client-server pod deployment", func() {
 			// Install OSM
-			td.InstallOSM(td.GetTestInstallOpts())
-			td.WaitForPodsRunningReady(td.osmMeshName, 60*time.Second, 1)
+			Expect(td.InstallOSM(td.GetTestInstallOpts())).To(Succeed())
+			Expect(td.WaitForPodsRunningReady(td.osmMeshName, 60*time.Second, 1)).To(Succeed())
 
 			// Create Test NS
 			for _, n := range ns {
-				td.CreateNs(n, nil)
+				Expect(td.CreateNs(n, nil)).To(Succeed())
 			}
 
 			// Get simple pod definitions for the HTTP server
@@ -31,12 +32,15 @@ var _ = Describe("Simple Client-Server pod test", func() {
 					image:     "kennethreitz/httpbin",
 				})
 
-			td.CreateServiceAccount(destNs, &svcAccDef)
-			dstPod, _ := td.CreatePod(destNs, podDef)
-			td.CreateService(destNs, svcDef)
+			_, err := td.CreateServiceAccount(destNs, &svcAccDef)
+			Expect(err).NotTo(HaveOccurred())
+			dstPod, err := td.CreatePod(destNs, podDef)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = td.CreateService(destNs, svcDef)
+			Expect(err).NotTo(HaveOccurred())
 
 			// Expect it to be up and running in it's receiver namespace
-			td.WaitForPodsRunningReady(destNs, 60*time.Second, 1)
+			Expect(td.WaitForPodsRunningReady(destNs, 60*time.Second, 1)).To(Succeed())
 
 			// Get simple Pod definitions for the client
 			svcAccDef, podDef, svcDef = td.SimplePodApp(SimplePodAppDef{
@@ -47,12 +51,15 @@ var _ = Describe("Simple Client-Server pod test", func() {
 				image:     "songrgg/alpine-debug",
 			})
 
-			td.CreateServiceAccount(sourceNs, &svcAccDef)
-			srcPod, _ := td.CreatePod(sourceNs, podDef)
-			td.CreateService(sourceNs, svcDef)
+			_, err = td.CreateServiceAccount(sourceNs, &svcAccDef)
+			Expect(err).NotTo(HaveOccurred())
+			srcPod, err := td.CreatePod(sourceNs, podDef)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = td.CreateService(sourceNs, svcDef)
+			Expect(err).NotTo(HaveOccurred())
 
 			// Expect it to be up and running in it's receiver namespace
-			td.WaitForPodsRunningReady(sourceNs, 60*time.Second, 1)
+			Expect(td.WaitForPodsRunningReady(sourceNs, 60*time.Second, 1)).To(Succeed())
 
 			// Deploy allow rule client->server
 			httpRG, trafficTarget := td.CreateSimpleAllowPolicy(
@@ -68,12 +75,14 @@ var _ = Describe("Simple Client-Server pod test", func() {
 				})
 
 			// Configs have to be put into a monitored NS, and osm-system can't be by cli
-			td.CreateHTTPRouteGroup(sourceNs, httpRG)
-			td.CreateTrafficTarget(sourceNs, trafficTarget)
+			_, err = td.CreateHTTPRouteGroup(sourceNs, httpRG)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = td.CreateTrafficTarget(sourceNs, trafficTarget)
+			Expect(err).NotTo(HaveOccurred())
 
 			// All ready. Expect client to reach server
 			// Need to get the pod though.
-			if !WaitForRepeatedSuccess(func() bool {
+			cond := WaitForRepeatedSuccess(func() bool {
 				statusCode, _, err :=
 					td.HTTPRequest(HTTPRequestDef{
 						SourceNs:        srcPod.Namespace,
@@ -92,12 +101,8 @@ var _ = Describe("Simple Client-Server pod test", func() {
 				}
 				td.T.Logf("> REST req succeeded: %d", statusCode)
 				return true
-			}, 5, 60*time.Second) {
-				td.T.Logf("Test Failed")
-				td.T.FailNow()
-			} else {
-				td.T.Logf("Test Passed")
-			}
+			}, 5, 60*time.Second)
+			Expect(cond).To(BeTrue())
 		})
 	})
 })
