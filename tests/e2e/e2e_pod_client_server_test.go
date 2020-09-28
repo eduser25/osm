@@ -16,15 +16,12 @@ var _ = Describe("Simple Client-Server pod test", func() {
 		It("Tests HTTP traffic for a simple client-server pod deployment", func() {
 			// Install OSM
 			td.InstallOSM(td.GetTestInstallOpts())
-			td.WaitForPodsRunningReady(td.osmMeshName, 60*time.Second)
+			td.WaitForPodsRunningReady(td.osmMeshName, 60*time.Second, 1)
 
 			// Create Test NS
 			for _, n := range ns {
 				td.CreateNs(n, nil)
 			}
-
-			// Add Namespaces to mesh
-			td.AddNsToMesh(true, ns...)
 
 			// Get simple pod definitions for the HTTP server
 			svcAccDef, podDef, svcDef := td.SimplePodApp(
@@ -39,7 +36,7 @@ var _ = Describe("Simple Client-Server pod test", func() {
 			td.CreateService(destNs, svcDef)
 
 			// Expect it to be up and running in it's receiver namespace
-			td.WaitForPodsRunningReady(destNs, 60*time.Second)
+			td.WaitForPodsRunningReady(destNs, 60*time.Second, 1)
 
 			// Get simple Pod definitions for the client
 			svcAccDef, podDef, svcDef = td.SimplePodApp(SimplePodAppDef{
@@ -55,7 +52,7 @@ var _ = Describe("Simple Client-Server pod test", func() {
 			td.CreateService(sourceNs, svcDef)
 
 			// Expect it to be up and running in it's receiver namespace
-			td.WaitForPodsRunningReady(sourceNs, 60*time.Second)
+			td.WaitForPodsRunningReady(sourceNs, 60*time.Second, 1)
 
 			// Deploy allow rule client->server
 			httpRG, trafficTarget := td.CreateSimpleAllowPolicy(
@@ -76,7 +73,7 @@ var _ = Describe("Simple Client-Server pod test", func() {
 
 			// All ready. Expect client to reach server
 			// Need to get the pod though.
-			WaitForRepeatedSuccess(func() bool {
+			if !WaitForRepeatedSuccess(func() bool {
 				statusCode, _, err :=
 					td.HTTPRequest(HTTPRequestDef{
 						SourceNs:        srcPod.Namespace,
@@ -95,7 +92,12 @@ var _ = Describe("Simple Client-Server pod test", func() {
 				}
 				td.T.Logf("> REST req succeeded: %d", statusCode)
 				return true
-			}, 5, 60*time.Second)
+			}, 5, 60*time.Second) {
+				td.T.Logf("Test Failed")
+				td.T.FailNow()
+			} else {
+				td.T.Logf("Test Passed")
+			}
 		})
 	})
 })
