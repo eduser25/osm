@@ -39,6 +39,9 @@ var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
 				Expect(td.AddNsToMesh(true, srcClient)).To(Succeed())
 			}
 
+			// To wait for all
+			var wg sync.WaitGroup
+
 			// Get simple pod definitions for the HTTP server
 			svcAccDef, deploymentDef, svcDef := td.SimpleDeploymentApp(
 				SimpleDeploymentAppDef{
@@ -55,11 +58,12 @@ var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
 			_, err = td.CreateService(destApp, svcDef)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Expect it to be up and running in it's receiver namespace
-			Expect(td.WaitForPodsRunningReady(destApp, 200*time.Second, replicaSetPerApp)).To(Succeed())
+			wg.Add(1)
+			go func(wg *sync.WaitGroup, srcClient string) {
+				defer wg.Done()
+				Expect(td.WaitForPodsRunningReady(destApp, 200*time.Second, replicaSetPerApp)).To(Succeed())
+			}(&wg, destApp)
 
-			// Jumpstart clients
-			var wg sync.WaitGroup
 			for _, srcClient := range sourceApplications {
 				svcAccDef, deploymentDef, svcDef = td.SimpleDeploymentApp(
 					SimpleDeploymentAppDef{
@@ -85,58 +89,6 @@ var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
 			}
 
 			wg.Wait()
-
-			// td.CreateServiceAccount(sourceNs, &svcAccDef)
-			// srcPod, _ := td.CreatePod(sourceNs, podDef)
-			// td.CreateService(sourceNs, svcDef)
-
-			// // Expect it to be up and running in it's receiver namespace
-			// td.WaitForPodsRunningReady(sourceNs, 60*time.Second)
-
-			// // Deploy allow rule client->server
-			// httpRG, trafficTarget := td.CreateSimpleAllowPolicy(
-			// 	SimpleAllowPolicy{
-			// 		RouteGroupName:    "routes",
-			// 		TrafficTargetName: "test-target",
-
-			// 		SourceNamespace:      sourceNs,
-			// 		SourceSVCAccountName: "client",
-
-			// 		DestinationNamespace:      destNs,
-			// 		DestinationSvcAccountName: "server",
-			// 	})
-
-			// // Configs have to be put into a monitored NS, and osm-system can't be by cli
-			// td.CreateHTTPRouteGroup(sourceNs, httpRG)
-			// td.CreateTrafficTarget(sourceNs, trafficTarget)
-
-			// // All ready. Expect client to reach server
-			// // Need to get the pod though.
-			// if !WaitForRepeatedSuccess(func() bool {
-			// 	statusCode, _, err :=
-			// 		td.HTTPRequest(HTTPRequestDef{
-			// 			SourceNs:        srcPod.Namespace,
-			// 			SourcePod:       srcPod.Name,
-			// 			SourceContainer: "client", // We can do better
-
-			// 			Destination: fmt.Sprintf("%s.%s", dstPod.Name, dstPod.Namespace),
-
-			// 			HTTPUrl: "/",
-			// 			Port:    80,
-			// 		})
-
-			// 	if err != nil || statusCode != 200 {
-			// 		td.T.Logf("> REST req failed (status: %d) %v", statusCode, err)
-			// 		return false
-			// 	}
-			// 	td.T.Logf("> REST req succeeded: %d", statusCode)
-			// 	return true
-			// }, 5, 60*time.Second) {
-			// 	td.T.Logf("Test Failed")
-			// 	td.T.FailNow()
-			// } else {
-			// 	td.T.Logf("Test Passed")
-			// }
 		})
 	})
 })
