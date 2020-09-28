@@ -59,7 +59,7 @@ func (td *OsmTestData) CreateService(ns string, svc corev1.Service) (*corev1.Ser
 // We might want to decouple/interface/parametrize more things in the future. This can get complex very quickly; we might
 // want to have smaller apis to decouple getting to create individual service accounts, pod defs, deployments, etc...
 
-// SimplePodAppDef defines some parametres that might be desirable to parametrize the creation of a simple HTTP server pod
+// SimplePodAppDef defines some parametrization to create a pod-based application from template
 type SimplePodAppDef struct {
 	namespace string
 	name      string
@@ -105,6 +105,14 @@ func (td *OsmTestData) SimplePodApp(def SimplePodAppDef) (corev1.ServiceAccount,
 			},
 		},
 	}
+
+	if td.AreRegistryCredsPresent() {
+		podDefinition.Spec.ImagePullSecrets = []corev1.LocalObjectReference{
+			{
+				Name: registrySecretName,
+			},
+		}
+	}
 	if def.command != nil && len(def.command) > 0 {
 		podDefinition.Spec.Containers[0].Command = def.command
 	}
@@ -135,6 +143,7 @@ func (td *OsmTestData) SimplePodApp(def SimplePodAppDef) (corev1.ServiceAccount,
 	return serviceAccountDefinition, podDefinition, serviceDefinition
 }
 
+// SimpleDeploymentAppDef defines some parametrization to create a deployment-based application from template
 type SimpleDeploymentAppDef struct {
 	namespace    string
 	name         string
@@ -191,6 +200,14 @@ func (td *OsmTestData) SimpleDeploymentApp(def SimpleDeploymentAppDef) (corev1.S
 				},
 			},
 		},
+	}
+
+	if td.AreRegistryCredsPresent() {
+		deploymentDefinition.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{
+			{
+				Name: registrySecretName,
+			},
+		}
 	}
 
 	if def.command != nil && len(def.command) > 0 {
