@@ -3,6 +3,8 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -28,6 +30,11 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster/nodeutils"
 )
 
+const (
+	// contant name for the Registry Secret
+	registrySecretName = "acr-creds"
+)
+
 // OsmTestData stores common state and variables and flags of a test
 type OsmTestData struct {
 	T GinkgoTInterface // for common test logging
@@ -36,10 +43,13 @@ type OsmTestData struct {
 	waitForCleanup bool // Forces application to wait for deletion of resources
 
 	// OSM install-time variables
-	osmMeshName        string
-	ctrRegistry        string
-	ctrRegistrySercret string
-	osmImageTag        string
+	osmMeshName string
+	osmImageTag string
+
+	// Container registry related vars
+	ctrRegistryUser     string // User
+	ctrRegistryPassword string // Password, if any
+	ctrRegistryServer   string // server name. Has to be network reachable
 
 	kindCluster                    bool   // Create and use a kind cluster
 	clusterName                    string // Kind cluster name (used if kindCluster)
@@ -65,8 +75,9 @@ func registerFlags(td *OsmTestData) {
 	flag.BoolVar(&td.cleanupKindCluster, "cleanupKindCluster", true, "Cleanup kind cluster upon exit")
 	flag.BoolVar(&td.cleanupKindClusterBetweenTests, "cleanupKindClusterBetweenTests", true, "Cleanup kind cluster between tests")
 
-	flag.StringVar(&td.ctrRegistry, "containerRegistry", os.Getenv("CTR_REGISTRY"), "Container registry")
-	flag.StringVar(&td.ctrRegistrySercret, "containerRegistrySecret", os.Getenv("CTR_REGISTRY_PASSWORD"), "Container registry secret")
+	flag.StringVar(&td.ctrRegistryServer, "ctrRegistry", os.Getenv("CTR_REGISTRY"), "Container registry")
+	flag.StringVar(&td.ctrRegistryUser, "ctrRegistryUser", os.Getenv("CTR_REGISTRY_USER"), "Container registry")
+	flag.StringVar(&td.ctrRegistryPassword, "ctrRegistrySecret", os.Getenv("CTR_REGISTRY_PASSWORD"), "Container registry secret")
 
 	flag.StringVar(&td.osmImageTag, "osmImageTag", "latest", "OSM image tag")
 
@@ -79,13 +90,19 @@ func registerFlags(td *OsmTestData) {
 	}(), "OSM mesh name")
 }
 
+// AreRegistryCredsPresent is a simple macro to check user does indeed want to push creds secret
+// Images will later use pull-Policy to use this secret if true
+func (td *OsmTestData) AreRegistryCredsPresent() bool {
+	return len(td.ctrRegistryUser) > 0 && len(td.ctrRegistryPassword) > 0
+}
+
 // InitTestData Initializes the test structures
 func (td *OsmTestData) InitTestData(t GinkgoTInterface) error {
 	td.T = t
 	td.Namespaces = make(map[string]bool)
 
-	if len(td.ctrRegistry) == 0 {
-		td.T.Log("warn: did not read any container registry")
+	if len(td.ctrRegistryServer) == 0 {
+		td.T.Errorf("Err: did not read any container registry (did you forget setting CTR_REGISTRY?)")
 	}
 
 	if td.kindCluster && td.ClusterProvider == nil {
@@ -131,25 +148,23 @@ func (td *OsmTestData) InitTestData(t GinkgoTInterface) error {
 
 // InstallOSMOpts describes install options for OSM
 type InstallOSMOpts struct {
-	controlPlaneNS          string
-	containerRegistryLoc    string
-	containerRegistrySecret string
-	osmImagetag             string
-	deployGrafana           bool
-	deployPrometheus        bool
-	deployJaeger            bool
+	controlPlaneNS       string
+	containerRegistryLoc string
+	osmImagetag          string
+	deployGrafana        bool
+	deployPrometheus     bool
+	deployJaeger         bool
 }
 
 // GetTestInstallOpts returns Install opts based on test flags
 func (td *OsmTestData) GetTestInstallOpts() InstallOSMOpts {
 	return InstallOSMOpts{
-		controlPlaneNS:          td.osmMeshName,
-		containerRegistryLoc:    td.ctrRegistry,
-		containerRegistrySecret: td.ctrRegistrySercret,
-		osmImagetag:             td.osmImageTag,
-		deployGrafana:           false,
-		deployPrometheus:        false,
-		deployJaeger:            false,
+		controlPlaneNS:       td.osmMeshName,
+		containerRegistryLoc: td.ctrRegistryServer,
+		osmImagetag:          td.osmImageTag,
+		deployGrafana:        false,
+		deployPrometheus:     false,
+		deployJaeger:         false,
 	}
 }
 
@@ -168,7 +183,7 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) error {
 		}
 		var imageIDs []string
 		for _, name := range imageNames {
-			imageName := fmt.Sprintf("%s/%s:%s", td.ctrRegistry, name, td.osmImageTag)
+			imageName := fmt.Sprintf("%s/%s:%s", td.ctrRegistryServer, name, td.osmImageTag)
 			imageIDs = append(imageIDs, imageName)
 		}
 		imageData, err := docker.ImageSave(context.TODO(), imageIDs)
@@ -188,6 +203,9 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) error {
 		}
 	}
 
+	// Create NS to start with
+	td.CreateNs(td.osmMeshName, nil)
+
 	td.T.Log("Installing OSM")
 	var args []string
 
@@ -198,11 +216,8 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) error {
 		"--container-registry="+instOpts.containerRegistryLoc,
 		"--osm-image-tag="+instOpts.osmImagetag,
 		"--namespace="+instOpts.controlPlaneNS,
-		"--enable-debug-server")
-
-	if len(instOpts.containerRegistrySecret) != 0 {
-		args = append(args, "--container-registry-secret="+instOpts.containerRegistrySecret)
-	}
+		"--enable-debug-server",
+		"--container-registry-secret="+registrySecretName)
 
 	args = append(args, fmt.Sprintf("--enable-prometheus=%v", instOpts.deployPrometheus))
 	args = append(args, fmt.Sprintf("--enable-grafana=%v", instOpts.deployGrafana))
@@ -246,6 +261,11 @@ func (td *OsmTestData) CreateNs(nsName string, labels map[string]string) error {
 		labels = map[string]string{}
 	}
 
+	// For cleanup purposes, we mark this as present at this time.
+	// If the test can't run because there's the same namespace running, it's most
+	// likely that the user will want it gone anyway
+	td.Namespaces[nsName] = true
+
 	namespaceObj := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      nsName,
@@ -260,7 +280,12 @@ func (td *OsmTestData) CreateNs(nsName string, labels map[string]string) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to create namespace "+nsName)
 	}
-	td.Namespaces[nsName] = true
+
+	// Check if we are using any specific creds
+	if td.AreRegistryCredsPresent() {
+
+		td.CreateDockerRegistrySecret(nsName)
+	}
 
 	return nil
 }
@@ -453,5 +478,48 @@ func (td *OsmTestData) Cleanup(ct CleanupType) {
 			}
 			td.ClusterProvider = nil
 		}
+	}
+}
+
+// Docker specific Installation of container registry.
+// Taken from kubectl source itself
+type DockerConfig map[string]DockerConfigEntry
+type DockerConfigJSON struct {
+	Auths       DockerConfig      `json:"auths"`
+	HttpHeaders map[string]string `json:"HttpHeaders,omitempty"`
+}
+type DockerConfigEntry struct {
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Auth     string `json:"auth,omitempty"`
+}
+
+// CreateDockerRegistrySecret creates a secret named `registrySecretName` in namespace <ns>,
+// based on ctrRegistry variables
+func (td *OsmTestData) CreateDockerRegistrySecret(ns string) {
+	secret := &corev1.Secret{}
+	secret.Name = registrySecretName
+	secret.Type = corev1.SecretTypeDockerConfigJson
+	secret.Data = map[string][]byte{}
+
+	dockercfgAuth := DockerConfigEntry{
+		Username: td.ctrRegistryUser,
+		Password: td.ctrRegistryPassword,
+		Email:    "osm@osm.com",
+		Auth:     base64.StdEncoding.EncodeToString([]byte(td.ctrRegistryUser + ":" + td.ctrRegistryPassword)),
+	}
+
+	dockerCfgJSON := DockerConfigJSON{
+		Auths: map[string]DockerConfigEntry{td.ctrRegistryServer: dockercfgAuth},
+	}
+
+	json, _ := json.Marshal(dockerCfgJSON)
+	secret.Data[corev1.DockerConfigJsonKey] = json
+
+	td.T.Logf("Pushing Registry secret '%s' for namespace %s... ", registrySecretName, ns)
+	_, err := td.Client.CoreV1().Secrets(ns).Create(context.Background(), secret, metav1.CreateOptions{})
+	if err != nil {
+		td.T.Fatalf("Could not add registry secret")
 	}
 }
