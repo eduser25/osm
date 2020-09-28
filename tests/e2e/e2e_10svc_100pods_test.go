@@ -6,6 +6,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
@@ -24,41 +25,44 @@ var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
 
 		It("Tests HTTP traffic for a simple client-server pod deployment", func() {
 			// Install OSM
-			td.InstallOSM(td.GetTestInstallOpts())
-			td.WaitForPodsRunningReady(td.osmMeshName, 60*time.Second, 1)
+			Expect(td.InstallOSM(td.GetTestInstallOpts())).To(Succeed())
+			Expect(td.WaitForPodsRunningReady(td.osmMeshName, 60*time.Second, 1)).To(Succeed())
 
 			// Create Test NS
 			// Server NS
-			td.CreateNs(destApp, nil)
-			td.AddNsToMesh(true, destApp)
+			Expect(td.CreateNs(destApp, nil)).To(Succeed())
+			Expect(td.AddNsToMesh(true, destApp)).To(Succeed())
 
 			// Client Applications
 			for _, srcClient := range sourceApplications {
-				td.CreateNs(srcClient, nil)
-				td.AddNsToMesh(true, srcClient)
+				Expect(td.CreateNs(srcClient, nil)).To(Succeed())
+				Expect(td.AddNsToMesh(true, srcClient)).To(Succeed())
 			}
 
 			// Get simple pod definitions for the HTTP server
 			svcAccDef, deploymentDef, svcDef := td.SimpleDeploymentApp(
-				SimpleDeploymentApp{
+				SimpleDeploymentAppDef{
 					name:         "server",
 					namespace:    destApp,
 					replicaCount: int32(replicaSetPerApp),
 					image:        "kennethreitz/httpbin",
 				})
 
-			td.CreateServiceAccount(destApp, &svcAccDef)
-			td.CreateDeployment(destApp, deploymentDef)
-			td.CreateService(destApp, svcDef)
+			_, err := td.CreateServiceAccount(destApp, &svcAccDef)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = td.CreateDeployment(destApp, deploymentDef)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = td.CreateService(destApp, svcDef)
+			Expect(err).NotTo(HaveOccurred())
 
 			// Expect it to be up and running in it's receiver namespace
-			td.WaitForPodsRunningReady(destApp, 200*time.Second, replicaSetPerApp)
+			Expect(td.WaitForPodsRunningReady(destApp, 200*time.Second, replicaSetPerApp)).To(Succeed())
 
 			// Jumpstart clients
 			var wg sync.WaitGroup
 			for _, srcClient := range sourceApplications {
 				svcAccDef, deploymentDef, svcDef = td.SimpleDeploymentApp(
-					SimpleDeploymentApp{
+					SimpleDeploymentAppDef{
 						name:         srcClient,
 						namespace:    srcClient,
 						replicaCount: int32(replicaSetPerApp),
@@ -66,14 +70,17 @@ var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
 						args:         []string{"while true; do sleep 30; done;"},
 						image:        "songrgg/alpine-debug",
 					})
-				td.CreateServiceAccount(srcClient, &svcAccDef)
-				td.CreateDeployment(srcClient, deploymentDef)
-				td.CreateService(srcClient, svcDef)
+				_, err = td.CreateServiceAccount(srcClient, &svcAccDef)
+				Expect(err).NotTo(HaveOccurred())
+				_, err = td.CreateDeployment(srcClient, deploymentDef)
+				Expect(err).NotTo(HaveOccurred())
+				_, err = td.CreateService(srcClient, svcDef)
+				Expect(err).NotTo(HaveOccurred())
 
 				wg.Add(1)
 				go func(wg *sync.WaitGroup, srcClient string) {
 					defer wg.Done()
-					td.WaitForPodsRunningReady(srcClient, 200*time.Second, replicaSetPerApp)
+					Expect(td.WaitForPodsRunningReady(srcClient, 200*time.Second, replicaSetPerApp)).To(Succeed())
 				}(&wg, srcClient)
 			}
 
