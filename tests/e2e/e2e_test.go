@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster/nodeutils"
 )
 
-func estOneShot(t *testing.T) {
+func TestOneShot(t *testing.T) {
 	clusterName := "osm-e2e"
 	t.Log("Creating kind cluster", clusterName)
 	provider := cluster.NewProvider()
