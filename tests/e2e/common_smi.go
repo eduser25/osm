@@ -2,13 +2,12 @@ package e2e
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/pkg/errors"
 	smiAccess "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/access/v1alpha2"
 	smiSpecs "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/specs/v1alpha3"
 	smiTrafficAccessClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/access/clientset/versioned"
 	smiTrafficSpecClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/specs/clientset/versioned"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -19,28 +18,27 @@ type SmiClients struct {
 }
 
 // InitSMIClients is called to initialize SMI clients
-func (td *OsmTestData) InitSMIClients() {
+func (td *OsmTestData) InitSMIClients() error {
 	td.SmiClients = &SmiClients{}
 	var err error
 
 	td.SmiClients.SpecClient, err = smiTrafficSpecClient.NewForConfig(td.RestConfig)
 	if err != nil {
-		td.T.Fatalf("Failed to get SmiSpecClient for SMI: %v", err)
+		return errors.Wrap(err, "failed to create traffic spec client")
 	}
 
 	td.SmiClients.AccessClient, err = smiTrafficAccessClient.NewForConfig(td.RestConfig)
 	if err != nil {
-		td.T.Fatalf("Failed to get AccessClient for SMI: %v", err)
+		return errors.Wrap(err, "failed to create traffic acces client")
 	}
+	return nil
 }
 
 // CreateHTTPRouteGroup Creates an SMI Route Group
 func (td *OsmTestData) CreateHTTPRouteGroup(ns string, rg smiSpecs.HTTPRouteGroup) (*smiSpecs.HTTPRouteGroup, error) {
 	hrg, err := td.SmiClients.SpecClient.SpecsV1alpha3().HTTPRouteGroups(ns).Create(context.Background(), &rg, metav1.CreateOptions{})
 	if err != nil {
-		err := fmt.Errorf("Could not create HTTP Route Group: %v", err)
-		td.T.Fatalf("%v", err)
-		return nil, err
+		return nil, errors.Wrap(err, "failed to create HTTPRouteGroup")
 	}
 	return hrg, nil
 }
@@ -49,9 +47,7 @@ func (td *OsmTestData) CreateHTTPRouteGroup(ns string, rg smiSpecs.HTTPRouteGrou
 func (td *OsmTestData) CreateTrafficTarget(ns string, tar smiAccess.TrafficTarget) (*smiAccess.TrafficTarget, error) {
 	tt, err := td.SmiClients.AccessClient.AccessV1alpha2().TrafficTargets(ns).Create(context.Background(), &tar, metav1.CreateOptions{})
 	if err != nil {
-		err := fmt.Errorf("Could not create Traffic Target: %v", err)
-		td.T.Fatalf("%v", err)
-		return nil, err
+		return nil, errors.Wrap(err, "failed to create TrafficTarget")
 	}
 	return tt, nil
 }
