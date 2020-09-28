@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// Global context for now. This will prevent tests running
+// Global context for now. This will prevent tests running parallely though.
 var td OsmTestData
 
 // Since parseFlags is global, this is the Ginkgo way to do it. Cant help it.

@@ -3,7 +3,7 @@
 set -aueo pipefail
 
 # shellcheck disable=SC1091
-source .env
+source ../../.env
 
 [[ $# -eq 0 ]] && { echo "Missing required namespace argument"; exit 1; }
 namespace="$1"
@@ -17,6 +17,7 @@ fi
 
 REGISTRY=$(echo "$CTR_REGISTRY" | awk -F'.' '{print $1}')
 REGISTRY_URL=$(echo "$CTR_REGISTRY" | awk -F'.' '{print $1 "." $2 "." $3}')
+CTR_REGISTRY_CREDS_NAME="${CTR_REGISTRY_CREDS_NAME:-acr-creds}"
 
 echo "Creating container registry credentials ($CTR_REGISTRY_CREDS_NAME) for Kubernetes in namespace ($namespace) for the given Azure Container Registry ($REGISTRY_URL)"
 

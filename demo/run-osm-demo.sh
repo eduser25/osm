@@ -101,6 +101,7 @@ make docker-push
 echo "Certificate Manager in use: $CERT_MANAGER"
 if [ "$CERT_MANAGER" = "vault" ]; then
   # shellcheck disable=SC2086
+  set -x
   bin/osm install \
       --namespace "$K8S_NAMESPACE" \
       --mesh-name "$MESH_NAME" \
@@ -120,6 +121,7 @@ if [ "$CERT_MANAGER" = "vault" ]; then
       $optionalInstallArgs
 else
   # shellcheck disable=SC2086
+  set -x
   bin/osm install \
       --namespace "$K8S_NAMESPACE" \
       --mesh-name "$MESH_NAME" \

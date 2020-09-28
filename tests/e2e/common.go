@@ -118,8 +118,9 @@ func (td *OsmTestData) InitTestData(t GinkgoTInterface) {
 	td.InitSMIClients()
 
 	// After client creations, do a wait for kind cluster just in case it's not done yet coming up
+	// Ballparking number. kind has a large number of containers to run by default
 	if td.kindCluster && td.ClusterProvider != nil {
-		td.WaitForPodsRunningReady("kube-system", 60*time.Second)
+		td.WaitForPodsRunningReady("kube-system", 60*time.Second, 5)
 	}
 }
 
@@ -339,26 +340,35 @@ func (td *OsmTestData) RunRemote(
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), nil
 }
 
-// WaitForPodsRunningReady waits for a pods on an NS to be running and ready
-func (td *OsmTestData) WaitForPodsRunningReady(ns string, timeout time.Duration) error {
+// WaitForPodsRunningReady waits for a <n> number of pods on an NS to be running and ready
+func (td *OsmTestData) WaitForPodsRunningReady(ns string, timeout time.Duration, nExpectedRunningPods int) error {
 	td.T.Logf("Wait for pods ready in ns [%s]...", ns)
 	for start := time.Now(); time.Since(start) < timeout; time.Sleep(2 * time.Second) {
-		pods, err := td.Client.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{})
-		if err != nil || len(pods.Items) == 0 {
+		pods, err := td.Client.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{
+			FieldSelector: "status.phase=Running",
+		})
+
+		if err != nil {
+			td.T.Fatalf("Error running List Pods: %v", err)
+		}
+
+		if len(pods.Items) < nExpectedRunningPods {
+			time.Sleep(1)
 			continue
 		}
 
+		nReadyPods := 0
 		for _, pod := range pods.Items {
-			if pod.Status.Phase != corev1.PodRunning {
-				continue
-			}
-
 			for _, cond := range pod.Status.Conditions {
 				if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
-					return nil
+					nReadyPods++
+					if nReadyPods == nExpectedRunningPods {
+						return nil
+					}
 				}
 			}
 		}
+		time.Sleep(1)
 	}
 
 	err := fmt.Errorf("Not all pods were Running & Ready in NS %s after %v", ns, timeout)
