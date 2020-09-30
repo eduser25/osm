@@ -17,10 +17,12 @@ import (
 	"github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo"
 	"github.com/pkg/errors"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -148,23 +150,37 @@ func (td *OsmTestData) InitTestData(t GinkgoTInterface) error {
 
 // InstallOSMOpts describes install options for OSM
 type InstallOSMOpts struct {
-	controlPlaneNS       string
-	containerRegistryLoc string
-	osmImagetag          string
-	deployGrafana        bool
-	deployPrometheus     bool
-	deployJaeger         bool
+	controlPlaneNS          string
+	certManager             string
+	containerRegistryLoc    string
+	containerRegistrySecret string
+	osmImagetag             string
+	deployGrafana           bool
+	deployPrometheus        bool
+	deployJaeger            bool
+
+	vaultHost     string
+	vaultProtocol string
+	vaultToken    string
+	vaultRole     string
 }
 
 // GetTestInstallOpts returns Install opts based on test flags
 func (td *OsmTestData) GetTestInstallOpts() InstallOSMOpts {
 	return InstallOSMOpts{
-		controlPlaneNS:       td.osmMeshName,
-		containerRegistryLoc: td.ctrRegistryServer,
-		osmImagetag:          td.osmImageTag,
-		deployGrafana:        false,
-		deployPrometheus:     false,
-		deployJaeger:         false,
+		controlPlaneNS:          td.osmMeshName,
+		certManager:             "tresor",
+		containerRegistryLoc:    td.ctrRegistryServer,
+		containerRegistrySecret: td.ctrRegistryPassword,
+		osmImagetag:             td.osmImageTag,
+		deployGrafana:           false,
+		deployPrometheus:        false,
+		deployJaeger:            false,
+
+		vaultHost:     "vault." + td.osmMeshName + ".svc.cluster.local",
+		vaultProtocol: "http",
+		vaultRole:     "openservicemesh",
+		vaultToken:    "token",
 	}
 }
 
@@ -203,8 +219,15 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) error {
 		}
 	}
 
-	// Create NS to start with
-	td.CreateNs(td.osmMeshName, nil)
+	if err := td.CreateNs(instOpts.controlPlaneNS, nil); err != nil {
+		return errors.Wrap(err, "failed to create namespace "+instOpts.controlPlaneNS)
+	}
+
+	if instOpts.certManager == "vault" {
+		if err := td.installVault(instOpts); err != nil {
+			return err
+		}
+	}
 
 	td.T.Log("Installing OSM")
 	var args []string
@@ -216,8 +239,23 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) error {
 		"--container-registry="+instOpts.containerRegistryLoc,
 		"--osm-image-tag="+instOpts.osmImagetag,
 		"--namespace="+instOpts.controlPlaneNS,
+		"--certificate-manager="+instOpts.certManager,
 		"--enable-debug-server",
-		"--container-registry-secret="+registrySecretName)
+	)
+
+	switch instOpts.certManager {
+	case "vault":
+		args = append(args,
+			"--vault-host="+instOpts.vaultHost,
+			"--vault-token="+instOpts.vaultToken,
+			"--vault-protocol="+instOpts.vaultProtocol,
+			"--vault-role="+instOpts.vaultRole,
+		)
+	}
+
+	if len(instOpts.containerRegistrySecret) != 0 {
+		args = append(args, "--container-registry-secret="+instOpts.containerRegistrySecret)
+	}
 
 	args = append(args, fmt.Sprintf("--enable-prometheus=%v", instOpts.deployPrometheus))
 	args = append(args, fmt.Sprintf("--enable-grafana=%v", instOpts.deployGrafana))
@@ -231,6 +269,155 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) error {
 		return errors.Wrap(err, "failed to run osm install")
 	}
 
+	return nil
+}
+
+func (td *OsmTestData) installVault(instOpts InstallOSMOpts) error {
+	td.T.Log("Installing Vault")
+	replicas := int32(1)
+	terminationGracePeriodSeconds := int64(10)
+	vaultDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "vault",
+			Labels: map[string]string{
+				"app": "vault",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": "vault",
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app": "vault",
+					},
+				},
+				Spec: corev1.PodSpec{
+					TerminationGracePeriodSeconds: &terminationGracePeriodSeconds,
+					Containers: []corev1.Container{
+						{
+							Name:            "vault",
+							Image:           "vault:1.4.0",
+							ImagePullPolicy: corev1.PullAlways,
+							Command:         []string{"/bin/sh", "-c"},
+							Args: []string{
+								fmt.Sprintf(`
+# Start the Vault Server
+vault server -dev -dev-listen-address=0.0.0.0:8200 -dev-root-token-id=%s & sleep 1;
+
+# Make the token available to the following commands
+echo %s>~/.vault-token;
+
+# Enable PKI secrets engine
+vault secrets enable pki;
+
+# Set the max allowed lease for a certificate to a decade
+vault secrets tune -max-lease-ttl=87600h pki;
+
+# Set the URLs (See: https://www.vaultproject.io/docs/secrets/pki#set-url-configuration)
+vault write pki/config/urls issuing_certificates='http://127.0.0.1:8200/v1/pki/ca' crl_distribution_points='http://127.0.0.1:8200/v1/pki/crl';
+
+# Configure a role for OSM (See: https://www.vaultproject.io/docs/secrets/pki#configure-a-role)
+vault write pki/roles/%s allow_any_name=true allow_subdomains=true;
+
+# Create the root certificate (See: https://www.vaultproject.io/docs/secrets/pki#setup)
+vault write pki/root/generate/internal common_name='osm.root' ttl='8765h';
+tail /dev/random;
+`, instOpts.vaultToken, instOpts.vaultToken, instOpts.vaultRole),
+							},
+							SecurityContext: &corev1.SecurityContext{
+								Capabilities: &corev1.Capabilities{
+									Add: []corev1.Capability{
+										"IPC_LOCK",
+									},
+								},
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									ContainerPort: 8200,
+									Name:          "vault-port",
+									Protocol:      corev1.ProtocolTCP,
+								},
+								{
+									ContainerPort: 8201,
+									Name:          "cluster-port",
+									Protocol:      corev1.ProtocolTCP,
+								},
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name:  "VAULT_ADDR",
+									Value: "http://localhost:8200",
+								},
+								{
+									Name: "POD_IP_ADDR",
+									ValueFrom: &corev1.EnvVarSource{
+										FieldRef: &corev1.ObjectFieldSelector{
+											FieldPath: "status.podIP",
+										},
+									},
+								},
+								{
+									Name:  "VAULT_LOCAL_CONFIG",
+									Value: "api_addr = \"http://127.0.0.1:8200\"\ncluster_addr = \"http://${POD_IP_ADDR}:8201\"",
+								},
+								{
+									Name:  "VAULT_DEV_ROOT_TOKEN_ID",
+									Value: "root", // THIS IS NOT A PRODUCTION DEPLOYMENT OF VAULT!
+								},
+							},
+							ReadinessProbe: &corev1.Probe{
+								Handler: corev1.Handler{
+									HTTPGet: &corev1.HTTPGetAction{
+										Path:   "/v1/sys/health",
+										Port:   intstr.FromInt(8200),
+										Scheme: corev1.URISchemeHTTP,
+									},
+								},
+								InitialDelaySeconds: 5,
+								PeriodSeconds:       5,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := td.Client.AppsV1().Deployments(instOpts.controlPlaneNS).Create(context.TODO(), vaultDep, metav1.CreateOptions{})
+	if err != nil {
+		return errors.Wrap(err, "failed to create vault deployment")
+	}
+
+	vaultSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "vault",
+			Labels: map[string]string{
+				"app": "vault",
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeLoadBalancer,
+			Selector: map[string]string{
+				"app": "vault",
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "vault-port",
+					Port:       8200,
+					TargetPort: intstr.FromInt(8200),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+		},
+	}
+	_, err = td.Client.CoreV1().Services(instOpts.controlPlaneNS).Create(context.TODO(), vaultSvc, metav1.CreateOptions{})
+	if err != nil {
+		return errors.Wrap(err, "failed to create vault service")
+	}
 	return nil
 }
 
