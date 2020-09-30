@@ -85,7 +85,7 @@ kind-reset:
 
 .PHONY: test-e2e
 test-e2e: docker-build-osm-controller docker-build-init build-osm
-	go test ./tests/e2e -test.v -ginkgo.v -ginkgo.progress -containerRegistry $(CTR_REGISTRY) -osmImageTag $(CTR_TAG) -kindCluster
+	go test ./tests/e2e -test.v -ginkgo.v -ginkgo.progress -ctrRegistry $(CTR_REGISTRY) -osmImageTag $(CTR_TAG) -kindCluster
 
 .env:
 	cp .env.example .env
