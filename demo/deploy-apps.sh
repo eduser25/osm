@@ -6,6 +6,7 @@ set -aueo pipefail
 source .env
 
 DEPLOY_WITH_SAME_SA="${DEPLOY_WITH_SAME_SA:-false}"
+CTR_REGISTRY_CREDS_NAME="${CTR_REGISTRY_CREDS_NAME:-}"
 
 # Deploy apps in the order of their dependencies to avoid initial timing errors
 # in osm-controller logs. Server apps are deployed before client apps.
