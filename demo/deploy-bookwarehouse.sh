@@ -58,7 +58,6 @@ spec:
         # Main container with APP
         - name: bookwarehouse
           image: "${CTR_REGISTRY}/bookwarehouse:${CTR_TAG}"
-          imagePullPolicy: Always
           command: ["/bookwarehouse"]
 
       imagePullSecrets:
