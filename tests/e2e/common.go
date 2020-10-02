@@ -254,7 +254,7 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) error {
 	}
 
 	if len(instOpts.containerRegistrySecret) != 0 {
-		args = append(args, "--container-registry-secret="+instOpts.containerRegistrySecret)
+		args = append(args, "--container-registry-secret="+registrySecretName)
 	}
 
 	args = append(args, fmt.Sprintf("--enable-prometheus=%v", instOpts.deployPrometheus))
