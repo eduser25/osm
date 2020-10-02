@@ -9,7 +9,7 @@ import (
 )
 
 var _ = Describe("Simple Client-Server pod test using Vault", func() {
-	Context("SimpleClientServer", func() {
+	Context("HashivaultSimpleClientServer", func() {
 		sourceNs := "client"
 		destNs := "server"
 		var ns []string = []string{sourceNs, destNs}
