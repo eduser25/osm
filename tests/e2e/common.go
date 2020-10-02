@@ -590,6 +590,7 @@ func (td *OsmTestData) WaitForPodsRunningReady(ns string, timeout time.Duration,
 				if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
 					nReadyPods++
 					if nReadyPods == nExpectedRunningPods {
+						td.T.Logf("Finished waiting for NS [%s].", ns)
 						return nil
 					}
 				}

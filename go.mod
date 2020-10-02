@@ -8,11 +8,13 @@ require (
 	github.com/Azure/go-autorest/autorest v0.10.0
 	github.com/Azure/go-autorest/autorest/azure/auth v0.1.0
 	github.com/Azure/go-autorest/autorest/to v0.3.0
+	github.com/ahmetalpbalkan/go-cursor v0.0.0-20131010032410-8136607ea412
 	github.com/axw/gocov v1.0.0
 	github.com/cncf/udpa/go v0.0.0-20200629203442-efcf912fb354 // indirect
 	github.com/deckarep/golang-set v1.7.1
 	github.com/docker/docker v1.4.2-0.20200203170920-46ec8731fbce
 	github.com/envoyproxy/go-control-plane v0.9.6
+	github.com/fatih/color v1.9.0
 	github.com/golang/mock v1.3.1
 	github.com/golang/protobuf v1.4.2
 	github.com/golangci/golangci-lint v1.30.0

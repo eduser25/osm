@@ -85,7 +85,7 @@ var _ = Describe("Simple Client-Server pod test using Vault", func() {
 			// All ready. Expect client to reach server
 			// Need to get the pod though.
 			cond := WaitForRepeatedSuccess(func() bool {
-				statusCode, _, err :=
+				result :=
 					td.HTTPRequest(HTTPRequestDef{
 						SourceNs:        srcPod.Namespace,
 						SourcePod:       srcPod.Name,
@@ -97,11 +97,11 @@ var _ = Describe("Simple Client-Server pod test using Vault", func() {
 						Port:    80,
 					})
 
-				if err != nil || statusCode != 200 {
-					td.T.Logf("> REST req failed (status: %d) %v", statusCode, err)
+				if result.Err != nil || result.StatusCode != 200 {
+					td.T.Logf("> REST req failed (status: %d) %v", result.StatusCode, result.Err)
 					return false
 				}
-				td.T.Logf("> REST req succeeded: %d", statusCode)
+				td.T.Logf("> REST req succeeded: %d", result.StatusCode)
 				return true
 			}, 5, 60*time.Second)
 			Expect(cond).To(BeTrue())
