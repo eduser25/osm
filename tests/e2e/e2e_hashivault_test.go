@@ -24,6 +24,7 @@ var _ = Describe("Simple Client-Server pod test using Vault", func() {
 			// Create Test NS
 			for _, n := range ns {
 				Expect(td.CreateNs(n, nil)).To(Succeed())
+				Expect(td.AddNsToMesh(true, n)).To(Succeed())
 			}
 
 			// Get simple pod definitions for the HTTP server
