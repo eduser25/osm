@@ -130,7 +130,7 @@ func (td *OsmTestData) SimplePodApp(def SimplePodAppDef) (corev1.ServiceAccount,
 		},
 	}
 
-	if len(def.ports) > 0 {
+	if def.ports != nil && len(def.ports) > 0 {
 		podDefinition.Spec.Containers[0].Ports = []corev1.ContainerPort{}
 		serviceDefinition.Spec.Ports = []corev1.ServicePort{}
 
