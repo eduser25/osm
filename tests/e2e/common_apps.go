@@ -66,6 +66,7 @@ type SimplePodAppDef struct {
 	image     string
 	command   []string
 	args      []string
+	ports     []int
 }
 
 // SimplePodApp creates a template for a Pod-based app definition for testing
@@ -90,11 +91,6 @@ func (td *OsmTestData) SimplePodApp(def SimplePodAppDef) (corev1.ServiceAccount,
 					Name:            def.name,
 					Image:           def.image,
 					ImagePullPolicy: corev1.PullIfNotPresent,
-					Ports: []corev1.ContainerPort{
-						{
-							ContainerPort: 80,
-						},
-					},
 					Resources: corev1.ResourceRequirements{
 						Limits: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -131,13 +127,24 @@ func (td *OsmTestData) SimplePodApp(def SimplePodAppDef) (corev1.ServiceAccount,
 			Selector: map[string]string{
 				"app": def.name,
 			},
-			Ports: []corev1.ServicePort{
-				{
-					Port:       80,
-					TargetPort: intstr.FromInt(80),
-				},
-			},
 		},
+	}
+
+	if def.ports != nil && len(def.ports) > 0 {
+		podDefinition.Spec.Containers[0].Ports = []corev1.ContainerPort{}
+		serviceDefinition.Spec.Ports = []corev1.ServicePort{}
+
+		for _, p := range def.ports {
+			podDefinition.Spec.Containers[0].Ports = append(podDefinition.Spec.Containers[0].Ports,
+				corev1.ContainerPort{
+					ContainerPort: int32(p),
+				},
+			)
+			serviceDefinition.Spec.Ports = append(serviceDefinition.Spec.Ports, corev1.ServicePort{
+				Port:       int32(p),
+				TargetPort: intstr.FromInt(p),
+			})
+		}
 	}
 
 	return serviceAccountDefinition, podDefinition, serviceDefinition
@@ -151,6 +158,7 @@ type SimpleDeploymentAppDef struct {
 	replicaCount int32
 	command      []string
 	args         []string
+	ports        []int
 }
 
 // SimpleDeploymentApp creates a template for a deployment-based app definition for testing
@@ -190,11 +198,6 @@ func (td *OsmTestData) SimpleDeploymentApp(def SimpleDeploymentAppDef) (corev1.S
 							Name:            def.name,
 							Image:           def.image,
 							ImagePullPolicy: corev1.PullIfNotPresent,
-							Ports: []corev1.ContainerPort{
-								{
-									ContainerPort: 80,
-								},
-							},
 						},
 					},
 				},
@@ -229,13 +232,25 @@ func (td *OsmTestData) SimpleDeploymentApp(def SimpleDeploymentAppDef) (corev1.S
 			Selector: map[string]string{
 				"app": def.name,
 			},
-			Ports: []corev1.ServicePort{
-				{
-					Port:       80,
-					TargetPort: intstr.FromInt(80),
-				},
-			},
 		},
+	}
+
+	if def.ports != nil && len(def.ports) > 0 {
+		deploymentDefinition.Spec.Template.Spec.Containers[0].Ports = []corev1.ContainerPort{}
+		serviceDefinition.Spec.Ports = []corev1.ServicePort{}
+
+		for _, p := range def.ports {
+			deploymentDefinition.Spec.Template.Spec.Containers[0].Ports = append(deploymentDefinition.Spec.Template.Spec.Containers[0].Ports,
+				corev1.ContainerPort{
+					ContainerPort: int32(p),
+				},
+			)
+
+			serviceDefinition.Spec.Ports = append(serviceDefinition.Spec.Ports, corev1.ServicePort{
+				Port:       int32(p),
+				TargetPort: intstr.FromInt(p),
+			})
+		}
 	}
 
 	return serviceAccountDefinition, deploymentDefinition, serviceDefinition

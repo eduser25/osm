@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ahmetalpbalkan/go-cursor"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/ahmetalpbalkan/go-cursor"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -18,7 +18,6 @@ var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
 		destApp := "server"
 		sourceAppBaseName := "client"
 		var sourceNamespaces []string = []string{} // for this test, (Service name == NS name == container name)
-		var podsPerNamespace map[string][]string = map[string][]string{}
 
 		// Total (numberOfClientApps x replicaSetPerApp) pods
 		numberOfClientApps := 5
@@ -60,6 +59,7 @@ var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
 					namespace:    destApp,
 					replicaCount: int32(replicaSetPerApp),
 					image:        "kennethreitz/httpbin",
+					ports:        []int{80},
 				})
 
 			_, err := td.CreateServiceAccount(destApp, &svcAccDef)
@@ -84,6 +84,7 @@ var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
 						command:      []string{"/bin/bash", "-c", "--"},
 						args:         []string{"while true; do sleep 30; done;"},
 						image:        "songrgg/alpine-debug",
+						ports:        []int{80}, // Can't deploy services with empty/no ports
 					})
 				_, err = td.CreateServiceAccount(srcClient, &svcAccDef)
 				Expect(err).NotTo(HaveOccurred())
@@ -122,93 +123,49 @@ var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			// Get Deterministic list of pods per source application
-			// Walking maps is NOT deterministic in golang, this causes scrambled output later when walking map ranges repeatedly
+			// Create Multiple HTTP request structure
+			requests := HTTPMultipleRequest{
+				Sources: []HTTPRequestDef{},
+			}
 			for _, ns := range sourceNamespaces {
-				// Get pods for every service (assuming every service is enclosed in a namespace, we can get all pods for an NS)
 				pods, err := td.Client.CoreV1().Pods(ns).List(context.Background(), metav1.ListOptions{})
 				Expect(err).To(BeNil())
 
 				for _, pod := range pods.Items {
-					_, found := podsPerNamespace[ns]
-					if !found {
-						podsPerNamespace[ns] = []string{}
-					}
-					podsPerNamespace[ns] = append(podsPerNamespace[ns], pod.Name)
+					requests.Sources = append(requests.Sources, HTTPRequestDef{
+						SourceNs:        ns,
+						SourcePod:       pod.Name,
+						SourceContainer: ns, // container_name == NS for this test
+
+						Destination: fmt.Sprintf("%s.%s", destApp, destApp),
+
+						HTTPUrl: "/",
+						Port:    80,
+					})
 				}
 			}
 
-			// Map[ns][pod] -> HTTPResults
-			var results map[string]map[string]*HTTPAsyncResults = make(map[string]map[string]*HTTPAsyncResults)
-			// synchronization artifacts. We will reuse the global waitgroup
-			var stop bool = false
-
-			// Start HTTP async threads
-			for _, ns := range sourceNamespaces {
-				for _, pod := range podsPerNamespace[ns] {
-					// Create a Result
-					_, ok := results[ns]
-					if !ok {
-						results[ns] = make(map[string]*HTTPAsyncResults)
-					}
-					results[ns][pod] = NewHTTPAsyncResults()
-
-					go td.AsynchronousHTTPRunner(
-						HTTPAsync{
-							RequestData: HTTPRequestDef{
-								SourceNs:        ns,
-								SourcePod:       pod,
-								SourceContainer: ns, // container_name == NS for this test
-
-								Destination: fmt.Sprintf("%s.%s", destApp, destApp),
-
-								HTTPUrl: "/",
-								Port:    80,
-							},
-							ResponseDataStore: results[ns][pod],
-							StopSignal:        &stop,
-							WaitGroup:         &wg,
-							SleepTime:         1 * time.Second,
-						},
-					)
-				}
-			}
-
-			// Inspect results and wait for success/failure
+			var results HTTPMultipleResults
 			success := WaitForRepeatedSuccess(func() bool {
 				var overallSuccess bool = true
+				// Get results
+				results = td.MultipleHTTPRequest(&requests)
+				// Print
+				td.PrettyPrintHTTPResults(&results)
 
-				for _, ns := range sourceNamespaces {
-					podNames := []string{}
-					podResultsToPrint := []*HTTPAsyncResults{}
-
-					for _, pod := range podsPerNamespace[ns] {
-						podRes := results[ns][pod]
-
-						podResultsToPrint = append(podResultsToPrint, podRes)
-						podNames = append(podNames, pod)
-
-						podRes.withLock(func() {
-							if podRes.lastResult.Err != nil || podRes.lastResult.StatusCode != 200 {
-								overallSuccess = false
-							}
-						})
+				// Verify results
+				for _, ns := range results {
+					for _, podResult := range ns {
+						if podResult.Err != nil || podResult.StatusCode != 200 {
+							overallSuccess = false
+						}
 					}
-					td.PrettyPrintHTTPResults(ns, podNames, podResultsToPrint)
 				}
-				// Meaningful only on shell
-				td.T.Log(cursor.MoveUp(len(sourceNamespaces) + 1))
-
 				return overallSuccess
 			}, 5, 150*time.Second)
 
-			// Meaningful only on shell
-			td.T.Log(cursor.MoveDown(len(sourceNamespaces) + 1))
-
-			// Stop all async threads
-			stop = true
-			wg.Wait()
-
+			// Move the cursor down, skip the Print on console
+			td.T.Log(cursor.MoveDown(len(results) + 1))
 			Expect(success).To(BeTrue())
 		})
 	})

@@ -442,6 +442,17 @@ func (td *OsmTestData) AddNsToMesh(sidecardInject bool, ns ...string) error {
 	return nil
 }
 
+// CreateMultipleNs simple CreateNs with multiple wrapper
+func (td *OsmTestData) CreateMultipleNs(nsName ...string) error {
+	for _, ns := range nsName {
+		err := td.CreateNs(ns, nil)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CreateNs Creates a test NS
 func (td *OsmTestData) CreateNs(nsName string, labels map[string]string) error {
 	if labels == nil {
