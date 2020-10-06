@@ -124,7 +124,7 @@ var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
 			}
 
 			// Create Multiple HTTP request structure
-			var requests HTTPMultipleRequest = HTTPMultipleRequest{
+			requests := HTTPMultipleRequest{
 				Sources: []HTTPRequestDef{},
 			}
 			for _, ns := range sourceNamespaces {
