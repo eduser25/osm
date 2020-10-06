@@ -32,6 +32,7 @@ var _ = Describe("Simple Client-Server pod test using Vault", func() {
 					name:      "server",
 					namespace: destNs,
 					image:     "kennethreitz/httpbin",
+					ports:     []int{80},
 				})
 
 			_, err := td.CreateServiceAccount(destNs, &svcAccDef)
@@ -51,6 +52,7 @@ var _ = Describe("Simple Client-Server pod test using Vault", func() {
 				command:   []string{"/bin/bash", "-c", "--"},
 				args:      []string{"while true; do sleep 30; done;"},
 				image:     "songrgg/alpine-debug",
+				ports:     []int{80},
 			})
 
 			_, err = td.CreateServiceAccount(sourceNs, &svcAccDef)
