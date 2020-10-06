@@ -66,20 +66,22 @@ var _ = Describe("Simple Client-Server pod test", func() {
 			Expect(td.WaitForPodsRunningReady(sourceNs, 60*time.Second, 1)).To(Succeed())
 
 			By("Checking client can't talk to server without SMI policies")
+
+			clientToServer := HTTPRequestDef{
+				SourceNs:        srcPod.Namespace,
+				SourcePod:       srcPod.Name,
+				SourceContainer: "client", // We can do better
+
+				Destination: fmt.Sprintf("%s.%s", dstPod.Name, dstPod.Namespace),
+
+				HTTPUrl: "/",
+				Port:    80,
+			}
+
 			// All ready. Expect client not to reach server
 			// Need to get the pod though.
 			cond := WaitForRepeatedSuccess(func() bool {
-				result :=
-					td.HTTPRequest(HTTPRequestDef{
-						SourceNs:        srcPod.Namespace,
-						SourcePod:       srcPod.Name,
-						SourceContainer: "client", // We can do better
-
-						Destination: fmt.Sprintf("%s.%s", dstPod.Name, dstPod.Namespace),
-
-						HTTPUrl: "/",
-						Port:    80,
-					})
+				result := td.HTTPRequest(clientToServer)
 
 				if result.Err == nil || !strings.Contains(result.Err.Error(), "command terminated with exit code 7 ") {
 					td.T.Logf("> REST req failed incorrectly (status: %d) %v", result.StatusCode, result.Err)
@@ -114,17 +116,7 @@ var _ = Describe("Simple Client-Server pod test", func() {
 			// All ready. Expect client to reach server
 			// Need to get the pod though.
 			cond = WaitForRepeatedSuccess(func() bool {
-				result :=
-					td.HTTPRequest(HTTPRequestDef{
-						SourceNs:        srcPod.Namespace,
-						SourcePod:       srcPod.Name,
-						SourceContainer: "client", // We can do better
-
-						Destination: fmt.Sprintf("%s.%s", dstPod.Name, dstPod.Namespace),
-
-						HTTPUrl: "/",
-						Port:    80,
-					})
+				result := td.HTTPRequest(clientToServer)
 
 				if result.Err != nil || result.StatusCode != 200 {
 					td.T.Logf("> REST req failed (status: %d) %v", result.StatusCode, result.Err)
