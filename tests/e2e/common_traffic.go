@@ -3,13 +3,12 @@ package e2e
 import (
 	"bufio"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
-	. "github.com/onsi/gomega"
-
+	"github.com/ahmetalpbalkan/go-cursor"
 	"github.com/fatih/color"
 )
 
@@ -100,85 +99,81 @@ func mapCurlOuput(curlOut string) map[string]string {
 	return ret
 }
 
-// HTTPAsyncResults are a storage type for async results
-type HTTPAsyncResults struct {
-	mux        *sync.Mutex // Requied to read results by the caller, as they can updating
-	lastResult HTTPRequestResult
-}
+// HTTPMultipleResults   map[namespace][pod] -> HTTPResults
+type HTTPMultipleResults map[string]map[string]HTTPRequestResult
 
-// NewHTTPAsyncResults returns a properly initialized async results instance
-func NewHTTPAsyncResults() *HTTPAsyncResults {
-	return &HTTPAsyncResults{
-		mux: &sync.Mutex{},
-		lastResult: HTTPRequestResult{
-			Headers: map[string]string{},
-		},
-	}
-}
-
-// Convenience function
-func (res HTTPAsyncResults) withLock(f func()) {
-	res.mux.Lock()
-	defer res.mux.Unlock()
-	f()
-}
-
-// HTTPAsync is the context fed to a HTTP async thread to run HTTP queries.
-// Stores Request definition, and pointers to results, stop and wait structures.
-// Pointers are used to signal the fact that the calling application might
-type HTTPAsync struct {
+// HTTPMultipleRequest is a higher abstraction that allows programing and issuing multiple concurrent requests
+type HTTPMultipleRequest struct {
 	// Request
-	RequestData HTTPRequestDef
-
-	// Async results
-	ResponseDataStore *HTTPAsyncResults
-
-	// Stop signaling
-	StopSignal *bool
-	WaitGroup  *sync.WaitGroup
-
-	// Time sleep observed between requests
-	SleepTime time.Duration
+	Sources []HTTPRequestDef
 }
 
-// AsynchronousHTTPRunner is a template function which will run HTTP request, and update results at a regular interval.
-// Takes a context to store and synchronize with the calling thread
-func (td *OsmTestData) AsynchronousHTTPRunner(context HTTPAsync) {
-	context.WaitGroup.Add(1)
-	defer context.WaitGroup.Done()
+// MultipleHTTPRequest will issue a list of requests concurrently and return results when all requests have returned
+func (td *OsmTestData) MultipleHTTPRequest(requests *HTTPMultipleRequest) HTTPMultipleResults {
+	results := HTTPMultipleResults{}
+	mtx := sync.Mutex{}
+	wg := sync.WaitGroup{}
 
-	for !*context.StopSignal {
-		result := td.HTTPRequest(context.RequestData)
-
-		context.ResponseDataStore.withLock(func() {
-			context.ResponseDataStore.lastResult = result
-		})
-
-		time.Sleep(context.SleepTime)
-	}
-}
-
-// PrettyPrintHTTPResults prints a line of results. Takes Title/App/NS name, list of pod names and list of results
-func (td *OsmTestData) PrettyPrintHTTPResults(appName string, podNames []string, asyncRes []*HTTPAsyncResults) {
-	Expect(len(podNames)).To(Equal(len(asyncRes)))
-
-	strLine := fmt.Sprintf("%s - ", color.CyanString(appName))
-	for idx := range podNames {
-		strLine += fmt.Sprintf("%s: %s -", podNames[idx], getColoredStatusCode(asyncRes[idx]))
-	}
-	td.T.Log(strLine)
-}
-
-func getColoredStatusCode(res *HTTPAsyncResults) string {
-	var coloredStatus string
-	res.withLock(func() {
-		if res.lastResult.Err != nil {
-			coloredStatus = color.RedString("ERR")
-		} else if res.lastResult.StatusCode != 200 {
-			coloredStatus = color.YellowString("%d ", res.lastResult.StatusCode)
-		} else {
-			coloredStatus = color.HiGreenString("%d ", res.lastResult.StatusCode)
+	// Prepare results
+	for idx, r := range requests.Sources {
+		if _, ok := results[r.SourceNs]; !ok {
+			results[r.SourceNs] = map[string]HTTPRequestResult{}
 		}
-	})
+		if _, ok := results[r.SourceNs][r.SourcePod]; !ok {
+			results[r.SourceNs][r.SourcePod] = HTTPRequestResult{}
+		}
+
+		go func(ns string, podname string, htReq HTTPRequestDef) {
+			wg.Add(1)
+			defer wg.Done()
+			// NOTE: Assumes no two ns/pod requetsts in list.
+			r := td.HTTPRequest(htReq)
+			mtx.Lock()
+			results[ns][podname] = r
+			mtx.Unlock()
+		}(r.SourceNs, r.SourcePod, (*requests).Sources[idx])
+	}
+	wg.Wait()
+
+	return results
+}
+
+// PrettyPrintHTTPResults prints pod results per namespace
+func (td *OsmTestData) PrettyPrintHTTPResults(results *HTTPMultipleResults) {
+	// Walk maps deterministically, we get keys - sort them and walk after the map.
+	// Alternatively, we could use some OrderedMap implementation
+
+	namespaceKeys := []string{}
+	for nsKey := range *results {
+		namespaceKeys = append(namespaceKeys, nsKey)
+	}
+	sort.Strings(namespaceKeys)
+
+	for _, ns := range namespaceKeys {
+		podKeys := []string{}
+		for podKey := range (*results)[ns] {
+			podKeys = append(podKeys, podKey)
+		}
+		sort.Strings(podKeys)
+
+		strLine := fmt.Sprintf("%s - ", color.CyanString(ns))
+		for _, pod := range podKeys {
+			strLine += fmt.Sprintf("%s: %s -", pod, getColoredStatusCode((*results)[ns][pod]))
+		}
+		td.T.Log(strLine)
+	}
+	td.T.Log(cursor.MoveUp(len(namespaceKeys) + 1))
+}
+
+func getColoredStatusCode(res HTTPRequestResult) string {
+	var coloredStatus string
+	if res.Err != nil {
+		coloredStatus = color.RedString("ERR")
+	} else if res.StatusCode != 200 {
+		coloredStatus = color.YellowString("%d ", res.StatusCode)
+	} else {
+		coloredStatus = color.HiGreenString("%d ", res.StatusCode)
+	}
+
 	return coloredStatus
 }
