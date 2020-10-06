@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -64,6 +65,32 @@ var _ = Describe("Simple Client-Server pod test", func() {
 			// Expect it to be up and running in it's receiver namespace
 			Expect(td.WaitForPodsRunningReady(sourceNs, 60*time.Second, 1)).To(Succeed())
 
+			By("Checking client can't talk to server without SMI policies")
+			// All ready. Expect client not to reach server
+			// Need to get the pod though.
+			cond := WaitForRepeatedSuccess(func() bool {
+				result :=
+					td.HTTPRequest(HTTPRequestDef{
+						SourceNs:        srcPod.Namespace,
+						SourcePod:       srcPod.Name,
+						SourceContainer: "client", // We can do better
+
+						Destination: fmt.Sprintf("%s.%s", dstPod.Name, dstPod.Namespace),
+
+						HTTPUrl: "/",
+						Port:    80,
+					})
+
+				if result.Err == nil || !strings.Contains(result.Err.Error(), "command terminated with exit code 7 ") {
+					td.T.Logf("> REST req failed incorrectly (status: %d) %v", result.StatusCode, result.Err)
+					return false
+				}
+				td.T.Logf("> REST req failed correctly: %v", result.Err)
+				return true
+			}, 30, 60*time.Second)
+			Expect(cond).To(BeTrue())
+
+			By("Creating SMI policies")
 			// Deploy allow rule client->server
 			httpRG, trafficTarget := td.CreateSimpleAllowPolicy(
 				SimpleAllowPolicy{
@@ -83,9 +110,10 @@ var _ = Describe("Simple Client-Server pod test", func() {
 			_, err = td.CreateTrafficTarget(sourceNs, trafficTarget)
 			Expect(err).NotTo(HaveOccurred())
 
+			By("Checking client can talk to server with traffic target")
 			// All ready. Expect client to reach server
 			// Need to get the pod though.
-			cond := WaitForRepeatedSuccess(func() bool {
+			cond = WaitForRepeatedSuccess(func() bool {
 				result :=
 					td.HTTPRequest(HTTPRequestDef{
 						SourceNs:        srcPod.Namespace,
