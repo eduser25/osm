@@ -6,14 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ahmetalpbalkan/go-cursor"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
+var _ = Describe("Test N Clients -> 1 server", func() {
 	Context("DeploymentsClientServer", func() {
 		destApp := "server"
 		sourceAppBaseName := "client"
@@ -164,8 +163,6 @@ var _ = Describe("Test 10(x10 pods) Clients -> 1(x10 pods) server", func() {
 				return overallSuccess
 			}, 5, 150*time.Second)
 
-			// Move the cursor down, skip the Print on console
-			td.T.Log(cursor.MoveDown(len(results) + 1))
 			Expect(success).To(BeTrue())
 		})
 	})

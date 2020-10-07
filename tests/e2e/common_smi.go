@@ -6,8 +6,10 @@ import (
 	"github.com/pkg/errors"
 	smiAccess "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/access/v1alpha2"
 	smiSpecs "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/specs/v1alpha3"
+	smiSplit "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/split/v1alpha2"
 	smiTrafficAccessClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/access/clientset/versioned"
 	smiTrafficSpecClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/specs/clientset/versioned"
+	smiTrafficSplitClient "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/split/clientset/versioned"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -15,6 +17,7 @@ import (
 type SmiClients struct {
 	SpecClient   *smiTrafficSpecClient.Clientset
 	AccessClient *smiTrafficAccessClient.Clientset
+	SplitClient  *smiTrafficSplitClient.Clientset
 }
 
 // InitSMIClients is called to initialize SMI clients
@@ -31,6 +34,12 @@ func (td *OsmTestData) InitSMIClients() error {
 	if err != nil {
 		return errors.Wrap(err, "failed to create traffic acces client")
 	}
+
+	td.SmiClients.SplitClient, err = smiTrafficSplitClient.NewForConfig(td.RestConfig)
+	if err != nil {
+		return errors.Wrap(err, "failed to create traffic split client")
+	}
+
 	return nil
 }
 
@@ -46,6 +55,15 @@ func (td *OsmTestData) CreateHTTPRouteGroup(ns string, rg smiSpecs.HTTPRouteGrou
 // CreateTrafficTarget Creates an SMI TrafficTarget
 func (td *OsmTestData) CreateTrafficTarget(ns string, tar smiAccess.TrafficTarget) (*smiAccess.TrafficTarget, error) {
 	tt, err := td.SmiClients.AccessClient.AccessV1alpha2().TrafficTargets(ns).Create(context.Background(), &tar, metav1.CreateOptions{})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create TrafficTarget")
+	}
+	return tt, nil
+}
+
+// CreateTrafficSplit Creates an SMI TrafficSplit
+func (td *OsmTestData) CreateTrafficSplit(ns string, tar smiSplit.TrafficSplit) (*smiSplit.TrafficSplit, error) {
+	tt, err := td.SmiClients.SplitClient.SplitV1alpha2().TrafficSplits(ns).Create(context.Background(), &tar, metav1.CreateOptions{})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create TrafficTarget")
 	}
@@ -112,4 +130,46 @@ func (td *OsmTestData) CreateSimpleAllowPolicy(def SimpleAllowPolicy) (smiSpecs.
 	}
 
 	return routeGroup, trafficTarget
+}
+
+// TrafficSplitBakend is a simple define to refer to a TrafficSplit backend
+type TrafficSplitBakend struct {
+	Name   string
+	Weight int
+}
+
+// TrafficSplitDef is a simplified struct to get a TrafficSplit typed definition
+type TrafficSplitDef struct {
+	Name      string
+	Namespace string
+
+	TrafficSplitServiceName string
+	Backends                []TrafficSplitBakend
+}
+
+// CreateSimpleTrafficSplit Creates an SMI TrafficTarget
+func (td *OsmTestData) CreateSimpleTrafficSplit(def TrafficSplitDef) (smiSplit.TrafficSplit, error) {
+
+	ts := smiSplit.TrafficSplit{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      def.Name,
+			Namespace: def.Namespace,
+		},
+		Spec: smiSplit.TrafficSplitSpec{
+			Service: def.TrafficSplitServiceName,
+		},
+	}
+
+	if def.Backends != nil && len(def.Backends) > 0 {
+		ts.Spec.Backends = []smiSplit.TrafficSplitBackend{}
+
+		for _, b := range def.Backends {
+			ts.Spec.Backends = append(ts.Spec.Backends, smiSplit.TrafficSplitBackend{
+				Service: b.Name,
+				Weight:  b.Weight,
+			})
+		}
+	}
+
+	return ts, nil
 }

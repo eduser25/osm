@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ahmetalpbalkan/go-cursor"
 	"github.com/fatih/color"
 )
 
@@ -123,8 +122,8 @@ func (td *OsmTestData) MultipleHTTPRequest(requests *HTTPMultipleRequest) HTTPMu
 			results[r.SourceNs][r.SourcePod] = HTTPRequestResult{}
 		}
 
+		wg.Add(1)
 		go func(ns string, podname string, htReq HTTPRequestDef) {
-			wg.Add(1)
 			defer wg.Done()
 			// NOTE: Assumes no two ns/pod requetsts in list.
 			r := td.HTTPRequest(htReq)
@@ -162,7 +161,6 @@ func (td *OsmTestData) PrettyPrintHTTPResults(results *HTTPMultipleResults) {
 		}
 		td.T.Log(strLine)
 	}
-	td.T.Log(cursor.MoveUp(len(namespaceKeys) + 1))
 }
 
 func getColoredStatusCode(res HTTPRequestResult) string {
