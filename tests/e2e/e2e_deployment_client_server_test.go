@@ -29,7 +29,7 @@ var _ = Describe("N Clients deployments -> 1 Server deployment test", func() {
 			sourceNamespaces = append(sourceNamespaces, fmt.Sprintf("%s%d", sourceAppBaseName, i))
 		}
 
-		It("Tests HTTP traffic for from multiple client deployments to a server deployment", func() {
+		It("Tests HTTP traffic from multiple client deployments to a server deployment", func() {
 			// for cleanup only
 			td.cleanupNamespaces["server"] = true
 			for _, srcClient := range sourceNamespaces {

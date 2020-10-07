@@ -171,7 +171,7 @@ type InstallOSMOpts struct {
 	vaultRole     string
 }
 
-// GetOSMInstallOpts it's a provided helper to initialize install options for OSM
+// GetOSMInstallOpts initializes install options for OSM
 func (td *OsmTestData) GetOSMInstallOpts() InstallOSMOpts {
 	return InstallOSMOpts{
 		controlPlaneNS:          td.osmMeshName,

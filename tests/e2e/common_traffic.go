@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	// StatusCodeWord is word identifier to use on curl command, to print and parse REST Status code
+	// StatusCodeWord is an identifier used on curl commands to print and parse REST Status codes
 	StatusCodeWord = "StatusCode"
 )
 

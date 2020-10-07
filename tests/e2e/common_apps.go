@@ -150,7 +150,7 @@ func (td *OsmTestData) SimplePodApp(def SimplePodAppDef) (corev1.ServiceAccount,
 	return serviceAccountDefinition, podDefinition, serviceDefinition
 }
 
-// SimpleDeploymentAppDef defines some parametrization to create a pod-based application from template
+// SimpleDeploymentAppDef defines some parametrization to create a deployment-based application from template
 type SimpleDeploymentAppDef struct {
 	namespace    string
 	name         string
