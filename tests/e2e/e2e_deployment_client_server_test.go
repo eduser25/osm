@@ -12,11 +12,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-var _ = Describe("Test N Clients -> 1 server", func() {
+var _ = Describe("N Clients deployments -> 1 Server deployment test", func() {
 	Context("DeploymentsClientServer", func() {
 		destApp := "server"
 		sourceAppBaseName := "client"
-		var sourceNamespaces []string = []string{} // for this test, (Service name == NS name == container name)
+		var sourceNamespaces []string = []string{}
 
 		// Total (numberOfClientApps x replicaSetPerApp) pods
 		numberOfClientApps := 5
@@ -29,18 +29,17 @@ var _ = Describe("Test N Clients -> 1 server", func() {
 			sourceNamespaces = append(sourceNamespaces, fmt.Sprintf("%s%d", sourceAppBaseName, i))
 		}
 
-		It("Tests HTTP traffic for a simple client-server pod deployment", func() {
-			// For Cleanup only
-			td.Namespaces["server"] = true
+		It("Tests HTTP traffic for from multiple client deployments to a server deployment", func() {
+			// for cleanup only
+			td.cleanupNamespaces["server"] = true
 			for _, srcClient := range sourceNamespaces {
-				td.Namespaces[srcClient] = true
+				td.cleanupNamespaces[srcClient] = true
 			}
 
 			// Install OSM
-			Expect(td.InstallOSM(td.GetTestInstallOpts())).To(Succeed())
+			Expect(td.InstallOSM(td.GetOSMInstallOpts())).To(Succeed())
 			Expect(td.WaitForPodsRunningReady(td.osmMeshName, 60*time.Second, 1)).To(Succeed())
 
-			// Create Test NS
 			// Server NS
 			Expect(td.CreateNs(destApp, nil)).To(Succeed())
 			Expect(td.AddNsToMesh(true, destApp)).To(Succeed())
@@ -127,7 +126,7 @@ var _ = Describe("Test N Clients -> 1 server", func() {
 				Sources: []HTTPRequestDef{},
 			}
 			for _, ns := range sourceNamespaces {
-				pods, err := td.Client.CoreV1().Pods(ns).List(context.Background(), metav1.ListOptions{})
+				pods, err := td.client.CoreV1().Pods(ns).List(context.Background(), metav1.ListOptions{})
 				Expect(err).To(BeNil())
 
 				for _, pod := range pods.Items {

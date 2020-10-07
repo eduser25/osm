@@ -20,7 +20,7 @@ type SmiClients struct {
 	SplitClient  *smiTrafficSplitClient.Clientset
 }
 
-// InitSMIClients is called to initialize SMI clients
+// InitSMIClients initializes SMI clients on OsmTestData structure
 func (td *OsmTestData) InitSMIClients() error {
 	td.SmiClients = &SmiClients{}
 	var err error

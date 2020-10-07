@@ -12,20 +12,23 @@ import (
 )
 
 const (
-	// StatusCodeWord is a hardcoded word to use on curl command, to print and parse REST Status code
+	// StatusCodeWord is word identifier to use on curl command, to print and parse REST Status code
 	StatusCodeWord = "StatusCode"
 )
 
 // HTTPRequestDef defines a remote HTTP request intent
 type HTTPRequestDef struct {
+	// Source pod where to run the HTTP request from
 	SourceNs        string
 	SourcePod       string
 	SourceContainer string
 
-	Destination string // Either host or IP
-
+	// Either host or IP, ie. "server", "server1.server", "192.168.0.1"
+	Destination string
+	// HTTP path on url, ie. "/index.html"
 	HTTPUrl string
-	Port    int
+	// TCP port on request
+	Port int
 }
 
 // HTTPRequestResult represents results of an HTTPRequest call
@@ -35,14 +38,12 @@ type HTTPRequestResult struct {
 	Err        error
 }
 
-// HTTPRequest runs a basic HTTP resquest from the source ns/pod/container to the a given host destination
-// Returns Status code, map with HTTP headers and error if any
+// HTTPRequest runs a synchronous call to run the HTTPRequestDef and return a HTTPRequestResult
 func (td *OsmTestData) HTTPRequest(ht HTTPRequestDef) HTTPRequestResult {
 	// -s silent progress, -o output to devnull, '-D -' dump headers to "-" (stdout), -i Status code
 	// -I skip body download, '-w StatusCode:%{http_code}' prints Status code label-like for easy parsing
 	command := fmt.Sprintf("/usr/bin/curl -s -o /dev/null -D - -I -w %s:%%{http_code} http://%s:%d%s", StatusCodeWord, ht.Destination, ht.Port, ht.HTTPUrl)
 
-	//td.T.Logf("- (Curl) HTTP GET %s/%s[%s] -> http://%s:%d%s", ht.SourceNs, ht.SourcePod, ht.SourceContainer, ht.Destination, ht.Port, ht.HTTPUrl)
 	stdout, stderr, err := td.RunRemote(ht.SourceNs, ht.SourcePod, ht.SourceContainer, command)
 	if err != nil {
 		// Error codes from the execution come through err
@@ -58,7 +59,7 @@ func (td *OsmTestData) HTTPRequest(ht HTTPRequestDef) HTTPRequestResult {
 		td.T.Logf("[warn] Stderr: %v", stderr)
 	}
 
-	// Expecting predictable output at this point
+	// Expect predictable output at this point from the curl we executed
 	curlMappedReturn := mapCurlOuput(stdout)
 	statusCode, err := strconv.Atoi(curlMappedReturn[StatusCodeWord])
 	if err != nil {
@@ -77,8 +78,8 @@ func (td *OsmTestData) HTTPRequest(ht HTTPRequestDef) HTTPRequestResult {
 	}
 }
 
-// MapCurlOuput maps predictable stdout from our specific curl, which will
-// output reply headers in some form of "<name>: <value>"
+// MapCurlOuput maps stdout from our specific curl,
+// it expects headers on stdout like "<name>: <value...>"
 func mapCurlOuput(curlOut string) map[string]string {
 	var ret map[string]string = make(map[string]string)
 	scanner := bufio.NewScanner(strings.NewReader(curlOut))
@@ -98,14 +99,15 @@ func mapCurlOuput(curlOut string) map[string]string {
 	return ret
 }
 
-// HTTPMultipleResults   map[namespace][pod] -> HTTPResults
-type HTTPMultipleResults map[string]map[string]HTTPRequestResult
-
-// HTTPMultipleRequest is a higher abstraction that allows programing and issuing multiple concurrent requests
+// HTTPMultipleRequest takes multiple HTTP request defs to issue them concurrently
 type HTTPMultipleRequest struct {
 	// Request
 	Sources []HTTPRequestDef
 }
+
+// HTTPMultipleResults represents results from a multiple HTTP request call
+// results come back as a map[namespace][pod] -> HTTPResults
+type HTTPMultipleResults map[string]map[string]HTTPRequestResult
 
 // MultipleHTTPRequest will issue a list of requests concurrently and return results when all requests have returned
 func (td *OsmTestData) MultipleHTTPRequest(requests *HTTPMultipleRequest) HTTPMultipleResults {
@@ -120,13 +122,16 @@ func (td *OsmTestData) MultipleHTTPRequest(requests *HTTPMultipleRequest) HTTPMu
 		}
 		if _, ok := results[r.SourceNs][r.SourcePod]; !ok {
 			results[r.SourceNs][r.SourcePod] = HTTPRequestResult{}
+		} else {
+			td.T.Logf("WARN: Multiple requests from same pod %s. Results will overwrite.", r.SourcePod)
 		}
 
 		wg.Add(1)
 		go func(ns string, podname string, htReq HTTPRequestDef) {
 			defer wg.Done()
-			// NOTE: Assumes no two ns/pod requetsts in list.
 			r := td.HTTPRequest(htReq)
+
+			// Need lock to avoid concurrent map writes
 			mtx.Lock()
 			results[ns][podname] = r
 			mtx.Unlock()
@@ -139,9 +144,7 @@ func (td *OsmTestData) MultipleHTTPRequest(requests *HTTPMultipleRequest) HTTPMu
 
 // PrettyPrintHTTPResults prints pod results per namespace
 func (td *OsmTestData) PrettyPrintHTTPResults(results *HTTPMultipleResults) {
-	// Walk maps deterministically, we get keys - sort them and walk after the map.
-	// Alternatively, we could use some OrderedMap implementation
-
+	// We sort the keys to always walk the maps deterministically.
 	namespaceKeys := []string{}
 	for nsKey := range *results {
 		namespaceKeys = append(namespaceKeys, nsKey)

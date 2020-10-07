@@ -13,7 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-var _ = Describe("Test N clients -> N server backed with Traffic split", func() {
+var _ = Describe("N Clients deployments -> 1 Server deployment backed with Traffic split test", func() {
 	Context("ClientServerTrafficSplit", func() {
 		const (
 			// to name the header
@@ -47,14 +47,14 @@ var _ = Describe("Test N clients -> N server backed with Traffic split", func() 
 		// Used accross the test to wait for concurrent steps to finish
 		var wg sync.WaitGroup
 
-		It("Tests HTTP traffic for Clients to Servers, backed by a Traffic Split", func() {
+		It("Tests HTTP traffic from Clients to the traffic split Cluster IP", func() {
 			// For Cleanup only
 			for _, ns := range allNamespaces {
-				td.Namespaces[ns] = true
+				td.cleanupNamespaces[ns] = true
 			}
 
 			// Install OSM
-			Expect(td.InstallOSM(td.GetTestInstallOpts())).To(Succeed())
+			Expect(td.InstallOSM(td.GetOSMInstallOpts())).To(Succeed())
 			Expect(td.WaitForPodsRunningReady(td.osmMeshName, 60*time.Second, 1)).To(Succeed())
 
 			// Create NSs
@@ -189,7 +189,7 @@ var _ = Describe("Test N clients -> N server backed with Traffic split", func() 
 				Sources: []HTTPRequestDef{},
 			}
 			for _, ns := range clientServices {
-				pods, err := td.Client.CoreV1().Pods(ns).List(context.Background(), metav1.ListOptions{})
+				pods, err := td.client.CoreV1().Pods(ns).List(context.Background(), metav1.ListOptions{})
 				Expect(err).To(BeNil())
 
 				for _, pod := range pods.Items {

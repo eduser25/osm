@@ -11,53 +11,52 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-// CreateServiceAccount creates a service account
+// CreateServiceAccount is a wrapper to create a service account
 func (td *OsmTestData) CreateServiceAccount(ns string, svcAccount *corev1.ServiceAccount) (*corev1.ServiceAccount, error) {
-	svcAc, err := td.Client.CoreV1().ServiceAccounts(ns).Create(context.Background(), svcAccount, metav1.CreateOptions{})
+	svcAc, err := td.client.CoreV1().ServiceAccounts(ns).Create(context.Background(), svcAccount, metav1.CreateOptions{})
 	if err != nil {
 		err := fmt.Errorf("Could not create Service Account: %v", err)
-		td.T.Fatalf("%v", err)
 		return nil, err
 	}
 	return svcAc, nil
 }
 
-// CreatePod creates a pod
+// CreatePod is a wrapper to create a pod
 func (td *OsmTestData) CreatePod(ns string, pod corev1.Pod) (*corev1.Pod, error) {
-	podRet, err := td.Client.CoreV1().Pods(ns).Create(context.Background(), &pod, metav1.CreateOptions{})
+	podRet, err := td.client.CoreV1().Pods(ns).Create(context.Background(), &pod, metav1.CreateOptions{})
 	if err != nil {
 		err := fmt.Errorf("Could not create Pod: %v", err)
-		td.T.Fatalf("%v", err)
 		return nil, err
 	}
 	return podRet, nil
 }
 
-// CreateDeployment creates a pod
+// CreateDeployment is a wrapper to create a deployment
 func (td *OsmTestData) CreateDeployment(ns string, deployment appsv1.Deployment) (*appsv1.Deployment, error) {
-	deploymentRet, err := td.Client.AppsV1().Deployments(ns).Create(context.Background(), &deployment, metav1.CreateOptions{})
+	deploymentRet, err := td.client.AppsV1().Deployments(ns).Create(context.Background(), &deployment, metav1.CreateOptions{})
 	if err != nil {
 		err := fmt.Errorf("Could not create Deployment: %v", err)
-		td.T.Fatalf("%v", err)
 		return nil, err
 	}
 	return deploymentRet, nil
 }
 
-// CreateService a service
+// CreateService is a wrapper to create a service
 func (td *OsmTestData) CreateService(ns string, svc corev1.Service) (*corev1.Service, error) {
-	sv, err := td.Client.CoreV1().Services(ns).Create(context.Background(), &svc, metav1.CreateOptions{})
+	sv, err := td.client.CoreV1().Services(ns).Create(context.Background(), &svc, metav1.CreateOptions{})
 	if err != nil {
 		err := fmt.Errorf("Could not create Service: %v", err)
-		td.T.Fatalf("%v", err)
 		return nil, err
 	}
 	return sv, nil
 }
 
-// Strightforward Templates below
-// We might want to decouple/interface/parametrize more things in the future. This can get complex very quickly; we might
-// want to have smaller apis to decouple getting to create individual service accounts, pod defs, deployments, etc...
+/* Application templates
+ * The following functions contain high level helpers to create and get test aplication definitions.
+ *
+ * These abstractions aim to simplify and avoid tests having to individually type the the same k8s definitions for
+ * some common or recurrent deployment forms.
+ */
 
 // SimplePodAppDef defines some parametrization to create a pod-based application from template
 type SimplePodAppDef struct {
@@ -69,7 +68,8 @@ type SimplePodAppDef struct {
 	ports     []int
 }
 
-// SimplePodApp creates a template for a Pod-based app definition for testing
+// SimplePodApp creates returns a set of k8s typed definitions for a pod-based k8s definition.
+// Includes Pod, Service and ServiceAccount types
 func (td *OsmTestData) SimplePodApp(def SimplePodAppDef) (corev1.ServiceAccount, corev1.Pod, corev1.Service) {
 	serviceAccountDefinition := corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
@@ -150,7 +150,7 @@ func (td *OsmTestData) SimplePodApp(def SimplePodAppDef) (corev1.ServiceAccount,
 	return serviceAccountDefinition, podDefinition, serviceDefinition
 }
 
-// SimpleDeploymentAppDef defines some parametrization to create a deployment-based application from template
+// SimpleDeploymentAppDef defines some parametrization to create a pod-based application from template
 type SimpleDeploymentAppDef struct {
 	namespace    string
 	name         string
@@ -161,7 +161,8 @@ type SimpleDeploymentAppDef struct {
 	ports        []int
 }
 
-// SimpleDeploymentApp creates a template for a deployment-based app definition for testing
+// SimpleDeploymentApp creates returns a set of k8s typed definitions for a deployment-based k8s definition.
+// Includes Deployment, Service and ServiceAccount types
 func (td *OsmTestData) SimpleDeploymentApp(def SimpleDeploymentAppDef) (corev1.ServiceAccount, appsv1.Deployment, corev1.Service) {
 	serviceAccountDefinition := corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{

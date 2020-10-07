@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/client"
 	"github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo"
+
+	"github.com/docker/docker/client"
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -35,6 +35,7 @@ import (
 const (
 	// contant name for the Registry Secret
 	registrySecretName = "acr-creds"
+	defaultMeshName    = "osm-system"
 )
 
 // OsmTestData stores common state and variables and flags of a test
@@ -53,21 +54,24 @@ type OsmTestData struct {
 	ctrRegistryPassword string // registry password, if any
 	ctrRegistryServer   string // server name. Has to be network reachable
 
+	// Kind cluster related vars
 	kindCluster                    bool   // Create and use a kind cluster
 	clusterName                    string // Kind cluster name (used if kindCluster)
 	cleanupKindClusterBetweenTests bool   // Clean and re-create kind cluster between tests
 	cleanupKindCluster             bool   // Cleanup kind cluster upon test finish
 
 	// Cluster handles and rest config
-	RestConfig      *rest.Config
-	Client          *kubernetes.Clientset
-	SmiClients      *SmiClients
-	ClusterProvider *cluster.Provider // provider, used when kindCluster is used
+	restConfig      *rest.Config
+	client          *kubernetes.Clientset
+	smiClients      *SmiClients
+	clusterProvider *cluster.Provider // provider, used when kindCluster is used
 
-	// Managed resources, used to track what gets cleaned up after the test
-	Namespaces map[string]bool
+	// Tracks namespaces to cleanup when test finishes (if cleanup is enabled)
+	cleanupNamespaces map[string]bool
 }
 
+// Function to run at init before Ginkgo has called parseFlags
+// See suite_test.go for details on how Ginko calls parseFlags
 func registerFlags(td *OsmTestData) {
 	flag.BoolVar(&td.cleanupTest, "cleanupTest", true, "Cleanup test resources when done")
 	flag.BoolVar(&td.waitForCleanup, "waitForCleanup", true, "Wait for effective deletion of resources")
@@ -88,29 +92,31 @@ func registerFlags(td *OsmTestData) {
 		if len(tmp) != 0 {
 			return tmp
 		}
-		return "osm-system"
+		return defaultMeshName
 	}(), "OSM mesh name")
 }
 
-// AreRegistryCredsPresent is a simple macro to check user does indeed want to push creds secret
-// Images will later use pull-Policy to use this secret if true
+// AreRegistryCredsPresent checks if Registry Credentials are present
+// It's usually used to factor if a docker registry secret and ImagePullSecret
+// should be installed when creating namespaces and application templates
 func (td *OsmTestData) AreRegistryCredsPresent() bool {
 	return len(td.ctrRegistryUser) > 0 && len(td.ctrRegistryPassword) > 0
 }
 
 // InitTestData Initializes the test structures
+// Called by Gingkgo BeforeEach
 func (td *OsmTestData) InitTestData(t GinkgoTInterface) error {
 	td.T = t
-	td.Namespaces = make(map[string]bool)
+	td.cleanupNamespaces = make(map[string]bool)
 
 	if len(td.ctrRegistryServer) == 0 {
-		td.T.Errorf("Err: did not read any container registry (did you forget setting CTR_REGISTRY?)")
+		td.T.Errorf("Did not read any container registry (is CTR_REGISTRY set?)")
 	}
 
-	if td.kindCluster && td.ClusterProvider == nil {
-		td.ClusterProvider = cluster.NewProvider()
+	if td.kindCluster && td.clusterProvider == nil {
+		td.clusterProvider = cluster.NewProvider()
 		td.T.Logf("Creating local kind cluster")
-		if err := td.ClusterProvider.Create(td.clusterName); err != nil {
+		if err := td.clusterProvider.Create(td.clusterName); err != nil {
 			return errors.Wrap(err, "failed to create kind cluster")
 		}
 	}
@@ -130,16 +136,16 @@ func (td *OsmTestData) InitTestData(t GinkgoTInterface) error {
 		return errors.Wrap(err, "failed to create Kubernetes client")
 	}
 
-	td.RestConfig = kubeConfig
-	td.Client = clientset
+	td.restConfig = kubeConfig
+	td.client = clientset
 
 	if err := td.InitSMIClients(); err != nil {
 		return errors.Wrap(err, "failed to initialize SMI clients")
 	}
 
 	// After client creations, do a wait for kind cluster just in case it's not done yet coming up
-	// Ballparking number. kind has a large number of containers to run by default
-	if td.kindCluster && td.ClusterProvider != nil {
+	// Ballparking pod number. kind has a large number of containers to run by default
+	if td.kindCluster && td.clusterProvider != nil {
 		if err := td.WaitForPodsRunningReady("kube-system", 60*time.Second, 5); err != nil {
 			return errors.Wrap(err, "failed to wait for kube-system pods")
 		}
@@ -165,8 +171,8 @@ type InstallOSMOpts struct {
 	vaultRole     string
 }
 
-// GetTestInstallOpts returns Install opts based on test flags
-func (td *OsmTestData) GetTestInstallOpts() InstallOSMOpts {
+// GetOSMInstallOpts it's a provided helper to initialize install options for OSM
+func (td *OsmTestData) GetOSMInstallOpts() InstallOSMOpts {
 	return InstallOSMOpts{
 		controlPlaneNS:          td.osmMeshName,
 		certManager:             "tresor",
@@ -207,7 +213,7 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) error {
 			return errors.Wrap(err, "failed to get image data")
 		}
 		defer imageData.Close()
-		nodes, err := td.ClusterProvider.ListNodes(td.clusterName)
+		nodes, err := td.clusterProvider.ListNodes(td.clusterName)
 		if err != nil {
 			return errors.Wrap(err, "failed to list kind nodes")
 		}
@@ -233,7 +239,7 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) error {
 	var args []string
 
 	// Add OSM namespace to cleanup namespaces, in case the test can't init
-	td.Namespaces[instOpts.controlPlaneNS] = true
+	td.cleanupNamespaces[instOpts.controlPlaneNS] = true
 
 	args = append(args, "install",
 		"--container-registry="+instOpts.containerRegistryLoc,
@@ -387,7 +393,7 @@ tail /dev/random;
 			},
 		},
 	}
-	_, err := td.Client.AppsV1().Deployments(instOpts.controlPlaneNS).Create(context.TODO(), vaultDep, metav1.CreateOptions{})
+	_, err := td.client.AppsV1().Deployments(instOpts.controlPlaneNS).Create(context.TODO(), vaultDep, metav1.CreateOptions{})
 	if err != nil {
 		return errors.Wrap(err, "failed to create vault deployment")
 	}
@@ -414,7 +420,7 @@ tail /dev/random;
 			},
 		},
 	}
-	_, err = td.Client.CoreV1().Services(instOpts.controlPlaneNS).Create(context.TODO(), vaultSvc, metav1.CreateOptions{})
+	_, err = td.client.CoreV1().Services(instOpts.controlPlaneNS).Create(context.TODO(), vaultSvc, metav1.CreateOptions{})
 	if err != nil {
 		return errors.Wrap(err, "failed to create vault service")
 	}
@@ -442,7 +448,7 @@ func (td *OsmTestData) AddNsToMesh(sidecardInject bool, ns ...string) error {
 	return nil
 }
 
-// CreateMultipleNs simple CreateNs with multiple wrapper
+// CreateMultipleNs simple CreateNs for multiple NS creation
 func (td *OsmTestData) CreateMultipleNs(nsName ...string) error {
 	for _, ns := range nsName {
 		err := td.CreateNs(ns, nil)
@@ -453,7 +459,7 @@ func (td *OsmTestData) CreateMultipleNs(nsName ...string) error {
 	return nil
 }
 
-// CreateNs Creates a test NS
+// CreateNs creates a Namespace. Will automatically add Docker registry creds if provided
 func (td *OsmTestData) CreateNs(nsName string, labels map[string]string) error {
 	if labels == nil {
 		labels = map[string]string{}
@@ -462,7 +468,7 @@ func (td *OsmTestData) CreateNs(nsName string, labels map[string]string) error {
 	// For cleanup purposes, we mark this as present at this time.
 	// If the test can't run because there's the same namespace running, it's most
 	// likely that the user will want it gone anyway
-	td.Namespaces[nsName] = true
+	td.cleanupNamespaces[nsName] = true
 
 	namespaceObj := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -474,7 +480,7 @@ func (td *OsmTestData) CreateNs(nsName string, labels map[string]string) error {
 	}
 
 	td.T.Logf("Creating namespace %v", nsName)
-	_, err := td.Client.CoreV1().Namespaces().Create(context.Background(), namespaceObj, metav1.CreateOptions{})
+	_, err := td.client.CoreV1().Namespaces().Create(context.Background(), namespaceObj, metav1.CreateOptions{})
 	if err != nil {
 		return errors.Wrap(err, "failed to create namespace "+nsName)
 	}
@@ -492,8 +498,8 @@ func (td *OsmTestData) DeleteNs(nsName string) error {
 	var backgroundDelete metav1.DeletionPropagation = metav1.DeletePropagationBackground
 
 	td.T.Logf("Deleting namespace %v", nsName)
-	err := td.Client.CoreV1().Namespaces().Delete(context.Background(), nsName, metav1.DeleteOptions{PropagationPolicy: &backgroundDelete})
-	delete(td.Namespaces, nsName)
+	err := td.client.CoreV1().Namespaces().Delete(context.Background(), nsName, metav1.DeleteOptions{PropagationPolicy: &backgroundDelete})
+	delete(td.cleanupNamespaces, nsName)
 	if err != nil {
 		return errors.Wrap(err, "failed to delete namespace "+nsName)
 	}
@@ -501,7 +507,7 @@ func (td *OsmTestData) DeleteNs(nsName string) error {
 }
 
 // WaitForNamespacesDeleted waits for the namespaces to be deleted.
-// Taken from https://github.com/kubernetes/kubernetes/blob/master/test/e2e/framework/util.go#L258
+// Reference impl taken from https://github.com/kubernetes/kubernetes/blob/master/test/e2e/framework/util.go#L258
 func (td *OsmTestData) WaitForNamespacesDeleted(namespaces []string, timeout time.Duration) error {
 	ginkgo.By(fmt.Sprintf("Waiting for namespaces %+v to vanish", namespaces))
 	nsMap := map[string]bool{}
@@ -511,7 +517,7 @@ func (td *OsmTestData) WaitForNamespacesDeleted(namespaces []string, timeout tim
 	//Now POLL until all namespaces have been eradicated.
 	return wait.Poll(2*time.Second, timeout,
 		func() (bool, error) {
-			nsList, err := td.Client.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
+			nsList, err := td.client.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
 			if err != nil {
 				return false, err
 			}
@@ -543,10 +549,10 @@ func (td *OsmTestData) RunRemote(
 	command string) (string, string, error) {
 	var stdin, stdout, stderr bytes.Buffer
 
-	req := td.Client.CoreV1().RESTClient().Post().Resource("pods").Name(podName).
+	req := td.client.CoreV1().RESTClient().Post().Resource("pods").Name(podName).
 		Namespace(ns).SubResource("exec")
 
-	option := &v1.PodExecOptions{
+	option := &corev1.PodExecOptions{
 		Command:   strings.Fields(command),
 		Container: containerName,
 		Stdin:     true,
@@ -562,7 +568,7 @@ func (td *OsmTestData) RunRemote(
 		option,
 		runtime.NewParameterCodec(scheme),
 	)
-	exec, err := remotecommand.NewSPDYExecutor(td.RestConfig, "POST", req.URL())
+	exec, err := remotecommand.NewSPDYExecutor(td.restConfig, "POST", req.URL())
 	if err != nil {
 		return "", "", err
 	}
@@ -582,7 +588,7 @@ func (td *OsmTestData) RunRemote(
 func (td *OsmTestData) WaitForPodsRunningReady(ns string, timeout time.Duration, nExpectedRunningPods int) error {
 	td.T.Logf("Wait for pods ready in ns [%s]...", ns)
 	for start := time.Now(); time.Since(start) < timeout; time.Sleep(2 * time.Second) {
-		pods, err := td.Client.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{
+		pods, err := td.client.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{
 			FieldSelector: "status.phase=Running",
 		})
 
@@ -652,7 +658,7 @@ func (td *OsmTestData) Cleanup(ct CleanupType) {
 	// In-cluster Test resources cleanup(namespace, crds, specs and whatnot) here
 	if td.cleanupTest {
 		var nsList []string
-		for ns := range td.Namespaces {
+		for ns := range td.cleanupNamespaces {
 			td.DeleteNs(ns)
 			nsList = append(nsList, ns)
 		}
@@ -664,23 +670,23 @@ func (td *OsmTestData) Cleanup(ct CleanupType) {
 				td.T.Logf("Could not confirm all namespace deletion in time: %v", err)
 			}
 		}
-		td.Namespaces = map[string]bool{}
+		td.cleanupNamespaces = map[string]bool{}
 	}
 
 	// Kind cluster deletion, if needed
-	if td.kindCluster && td.ClusterProvider != nil {
+	if td.kindCluster && td.clusterProvider != nil {
 		if ct == Test && td.cleanupKindClusterBetweenTests || ct == Suite && td.cleanupKindCluster {
 			td.T.Logf("Deleting kind cluster: %s", td.clusterName)
-			if err := td.ClusterProvider.Delete(td.clusterName, clientcmd.RecommendedHomeFile); err != nil {
+			if err := td.clusterProvider.Delete(td.clusterName, clientcmd.RecommendedHomeFile); err != nil {
 				td.T.Logf("error deleting cluster: %v", err)
 			}
-			td.ClusterProvider = nil
+			td.clusterProvider = nil
 		}
 	}
 }
 
-// Docker specific Installation of container registry.
-// Taken from kubectl source itself
+//DockerConfig and other configs are docker-specific container registry secret structures.
+// Most of it is taken or referenced from kubectl source itself
 type DockerConfig map[string]DockerConfigEntry
 type DockerConfigJSON struct {
 	Auths       DockerConfig      `json:"auths"`
@@ -716,7 +722,7 @@ func (td *OsmTestData) CreateDockerRegistrySecret(ns string) {
 	secret.Data[corev1.DockerConfigJsonKey] = json
 
 	td.T.Logf("Pushing Registry secret '%s' for namespace %s... ", registrySecretName, ns)
-	_, err := td.Client.CoreV1().Secrets(ns).Create(context.Background(), secret, metav1.CreateOptions{})
+	_, err := td.client.CoreV1().Secrets(ns).Create(context.Background(), secret, metav1.CreateOptions{})
 	if err != nil {
 		td.T.Fatalf("Could not add registry secret")
 	}
