@@ -8,15 +8,15 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("Simple Client-Server pod test using Vault", func() {
+var _ = Describe("1 Client pod -> 1 Server pod test using Vault", func() {
 	Context("HashivaultSimpleClientServer", func() {
 		sourceNs := "client"
 		destNs := "server"
 		var ns []string = []string{sourceNs, destNs}
 
-		It("Tests HTTP traffic for a simple client-server pod deployment", func() {
+		It("Tests HTTP traffic for client pod -> server pod", func() {
 			// Install OSM
-			installOpts := td.GetTestInstallOpts()
+			installOpts := td.GetOSMInstallOpts()
 			installOpts.certManager = "vault"
 			Expect(td.InstallOSM(installOpts)).To(Succeed())
 			Expect(td.WaitForPodsRunningReady(td.osmMeshName, 60*time.Second, 2)).To(Succeed())

@@ -10,7 +10,8 @@ import (
 // Global context for now. This will prevent tests running parallely though.
 var td OsmTestData
 
-// Since parseFlags is global, this is the Ginkgo way to do it. Cant help it.
+// Since parseFlags is global, this is the Ginkgo way to do it.
+// "init" is usually called by the go test runtime
 // https://github.com/onsi/ginkgo/issues/265
 func init() {
 	registerFlags(&td)

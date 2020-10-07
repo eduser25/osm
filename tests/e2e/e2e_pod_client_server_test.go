@@ -9,15 +9,15 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("Simple Client-Server pod test", func() {
+var _ = Describe("1 Client pod -> 1 Server pod test", func() {
 	Context("SimpleClientServer", func() {
 		sourceNs := "client"
 		destNs := "server"
 		var ns []string = []string{sourceNs, destNs}
 
-		It("Tests HTTP traffic for a simple client-server pod deployment", func() {
+		It("Tests HTTP traffic for client pod -> server pod", func() {
 			// Install OSM
-			Expect(td.InstallOSM(td.GetTestInstallOpts())).To(Succeed())
+			Expect(td.InstallOSM(td.GetOSMInstallOpts())).To(Succeed())
 			Expect(td.WaitForPodsRunningReady(td.osmMeshName, 60*time.Second, 1)).To(Succeed())
 
 			// Create Test NS
