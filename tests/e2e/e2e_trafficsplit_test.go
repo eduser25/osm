@@ -47,7 +47,7 @@ var _ = Describe("Test N clients -> N server backed with Traffic split", func() 
 		// Used accross the test to wait for concurrent steps to finish
 		var wg sync.WaitGroup
 
-		It("Tests HTTP traffic for a simple client-server pod deployment", func() {
+		It("Tests HTTP traffic for Clients to Servers, backed by a Traffic Split", func() {
 			// For Cleanup only
 			for _, ns := range allNamespaces {
 				td.Namespaces[ns] = true
