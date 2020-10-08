@@ -63,7 +63,7 @@ type OsmTestData struct {
 	// Cluster handles and rest config
 	restConfig      *rest.Config
 	client          *kubernetes.Clientset
-	smiClients      *SmiClients
+	smiClients      *smiClients
 	clusterProvider *cluster.Provider // provider, used when kindCluster is used
 
 	// Tracks namespaces to cleanup when test finishes (if cleanup is enabled)

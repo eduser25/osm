@@ -113,8 +113,8 @@ var _ = Describe("1 Client pod -> 1 Server pod test", func() {
 			Expect(cond).To(BeTrue())
 
 			By("Deleting SMI policies")
-			Expect(td.SmiClients.AccessClient.AccessV1alpha2().TrafficTargets(sourceNs).Delete(context.TODO(), trafficTarget.Name, metav1.DeleteOptions{})).To(Succeed())
-			Expect(td.SmiClients.SpecClient.SpecsV1alpha3().HTTPRouteGroups(sourceNs).Delete(context.TODO(), httpRG.Name, metav1.DeleteOptions{})).To(Succeed())
+			Expect(td.smiClients.AccessClient.AccessV1alpha2().TrafficTargets(sourceNs).Delete(context.TODO(), trafficTarget.Name, metav1.DeleteOptions{})).To(Succeed())
+			Expect(td.smiClients.SpecClient.SpecsV1alpha3().HTTPRouteGroups(sourceNs).Delete(context.TODO(), httpRG.Name, metav1.DeleteOptions{})).To(Succeed())
 
 			// Expect client not to reach server
 			cond = WaitForRepeatedSuccess(func() bool {
