@@ -1,12 +1,14 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var _ = Describe("1 Client pod -> 1 Server pod test", func() {
@@ -65,8 +67,6 @@ var _ = Describe("1 Client pod -> 1 Server pod test", func() {
 			// Expect it to be up and running in it's receiver namespace
 			Expect(td.WaitForPodsRunningReady(sourceNs, 60*time.Second, 1)).To(Succeed())
 
-			By("Checking client can't talk to server without SMI policies")
-
 			clientToServer := HTTPRequestDef{
 				SourceNs:        srcPod.Namespace,
 				SourcePod:       srcPod.Name,
@@ -77,20 +77,6 @@ var _ = Describe("1 Client pod -> 1 Server pod test", func() {
 				HTTPUrl: "/",
 				Port:    80,
 			}
-
-			// All ready. Expect client not to reach server
-			// Need to get the pod though.
-			cond := WaitForRepeatedSuccess(func() bool {
-				result := td.HTTPRequest(clientToServer)
-
-				if result.Err == nil || !strings.Contains(result.Err.Error(), "command terminated with exit code 7 ") {
-					td.T.Logf("> REST req failed incorrectly (status: %d) %v", result.StatusCode, result.Err)
-					return false
-				}
-				td.T.Logf("> REST req failed correctly: %v", result.Err)
-				return true
-			}, 30, 60*time.Second)
-			Expect(cond).To(BeTrue())
 
 			By("Creating SMI policies")
 			// Deploy allow rule client->server
@@ -112,10 +98,9 @@ var _ = Describe("1 Client pod -> 1 Server pod test", func() {
 			_, err = td.CreateTrafficTarget(sourceNs, trafficTarget)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Checking client can talk to server with traffic target")
 			// All ready. Expect client to reach server
 			// Need to get the pod though.
-			cond = WaitForRepeatedSuccess(func() bool {
+			cond := WaitForRepeatedSuccess(func() bool {
 				result := td.HTTPRequest(clientToServer)
 
 				if result.Err != nil || result.StatusCode != 200 {
@@ -123,6 +108,23 @@ var _ = Describe("1 Client pod -> 1 Server pod test", func() {
 					return false
 				}
 				td.T.Logf("> REST req succeeded: %d", result.StatusCode)
+				return true
+			}, 5, 60*time.Second)
+			Expect(cond).To(BeTrue())
+
+			By("Deleting SMI policies")
+			Expect(td.SmiClients.AccessClient.AccessV1alpha2().TrafficTargets(sourceNs).Delete(context.TODO(), trafficTarget.Name, metav1.DeleteOptions{})).To(Succeed())
+			Expect(td.SmiClients.SpecClient.SpecsV1alpha3().HTTPRouteGroups(sourceNs).Delete(context.TODO(), httpRG.Name, metav1.DeleteOptions{})).To(Succeed())
+
+			// Expect client not to reach server
+			cond = WaitForRepeatedSuccess(func() bool {
+				result := td.HTTPRequest(clientToServer)
+
+				if result.Err == nil || !strings.Contains(result.Err.Error(), "command terminated with exit code 7 ") {
+					td.T.Logf("> REST req failed incorrectly (status: %d) %v", result.StatusCode, result.Err)
+					return false
+				}
+				td.T.Logf("> REST req failed correctly: %v", result.Err)
 				return true
 			}, 5, 60*time.Second)
 			Expect(cond).To(BeTrue())
