@@ -67,7 +67,8 @@ jobs:
         run: docker login --username "$CTR_REGISTRY_USER" --password "$CTR_REGISTRY_PASSWORD" $CTR_REGISTRY
       - name: Docker push
         run: make docker-push-osm-controller docker-push-init
-      - run: 'echo "$KUBECONF" > ~/.kube/conf'
+      - name: "Get kubeconf for scale setup"
+        run: 'mkdir -p ~/.kube/; echo "$KUBECONF" > ~/.kube/conf'
         shell: bash
         env:
           KUBECONF: ${{secrets.KUBECONF}}
