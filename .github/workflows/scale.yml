@@ -72,6 +72,10 @@ jobs:
         shell: bash
         env:
           KUBECONF: ${{secrets.KUBECONF}}
+          
+          
+      - name: Echo kubeconf
+        run: 'cat ~/.kube/conf'
       - name: Run Scale tests
         run: go test ./tests/scale -test.v -ginkgo.v -ginkgo.progress -test.timeout 0 -test.failfast -ginkgo.failFast -ginkgo.focus='ScaleClientServerTrafficSplit'
         env:
