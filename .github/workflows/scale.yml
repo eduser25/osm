@@ -74,3 +74,5 @@ jobs:
           KUBECONF: ${{secrets.KUBECONF}}
       - name: Run Scale tests
         run: go test ./tests/scale -test.v -ginkgo.v -ginkgo.progress -test.timeout 0 -test.failfast -ginkgo.failFast -ginkgo.focus='ScaleClientServerTrafficSplit'
+        env:
+          KUBECONFIG: ~/.kube/conf
