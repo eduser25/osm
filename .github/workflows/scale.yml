@@ -72,10 +72,11 @@ jobs:
         shell: bash
         env:
           KUBECONF: ${{secrets.KUBECONF}}
-          
-          
-      - name: Echo kubeconf
-        run: 'cat ~/.kube/conf'
+      - uses: azure/k8s-set-context@v1
+        with:
+          method: kubeconfig
+          kubeconfig: ${{secrets.KUBECONF}}
+        id: setcontext
       - name: Run Scale tests
         run: go test ./tests/scale -test.v -ginkgo.v -ginkgo.progress -test.timeout 0 -test.failfast -ginkgo.failFast -ginkgo.focus='ScaleClientServerTrafficSplit'
         env:
