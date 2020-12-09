@@ -1,0 +1,69 @@
+name: ScaleOnDemand
+on:
+  pull_request:
+    types: [opened]
+  issue_comment:
+    types: [created]
+env:
+  CTR_REGISTRY: ${{ secrets.ACR }}
+  CTR_REGISTRY_USER: ${{ secrets.ACRUSER }}
+  CTR_REGISTRY_PASSWORD: ${{ secrets.ACRPW }}
+  # CTR_TAG: latest  # defaulted
+jobs:
+  make:
+    name: Run Scale test
+    runs-on: ubuntu-latest
+    steps:
+      # Validate someone wrote the right string
+      - uses: khan/pull-request-comment-trigger@1.0.0
+        id: check
+        with:
+          trigger: '/runScale'
+          reaction: rocket
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+      
+      # Early exit otherwise
+      - run: 'exit -1'
+        if: steps.check.outputs.triggered == 'false'
+      
+      # Get the right branch information from the PR the comment is coming from
+      - uses: xt0rted/pull-request-comment-branch@v1
+        id: comment-branch
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Early exit otherwise
+      - run: 'exit -1'
+        if: success() == 'false'
+      
+      # compile, create containers, login, etc...
+      - name: Checkout v1
+        uses: actions/checkout@v1
+      - name: Checkout v2
+        uses: actions/checkout@v2
+        with:
+          path: ~/go/pkg/mod
+          ref: ${{ steps.comment-branch.outputs.head_ref }}
+      - name: Restore Module Cache
+        uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-gomod2-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-gomod2-
+      - name: Restore Build Cache
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('**/*.go') }}
+      - name: Setup Go 1.15
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.15
+      - name: Build binaries
+        run: make build-osm
+      - name: Docker Login
+        run: docker login --username "$CTR_REGISTRY_USER" --password "$CTR_REGISTRY_PASSWORD" $CTR_REGISTRY
+      - name: Docker push
+        run: make docker-push-osm-controller docker-push-init
