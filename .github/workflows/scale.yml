@@ -67,3 +67,9 @@ jobs:
         run: docker login --username "$CTR_REGISTRY_USER" --password "$CTR_REGISTRY_PASSWORD" $CTR_REGISTRY
       - name: Docker push
         run: make docker-push-osm-controller docker-push-init
+      - run: 'echo "$KUBECONF" > ~/.kube/conf'
+        shell: bash
+        env:
+          KUBECONF: ${{secrets.KUBECONF}}
+      - name: Run Scale tests
+        run: go test ./tests/scale -test.v -ginkgo.v -ginkgo.progress -test.timeout 0 -test.failfast -ginkgo.failFast -ginkgo.focus='ScaleClientServerTrafficSplit'
