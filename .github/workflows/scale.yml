@@ -73,4 +73,16 @@ jobs:
           kubeconfig: ${{secrets.KUBECONF}}
         id: setcontext
       - name: Run Scale tests
-        run: go test ./tests/scale -test.v -ginkgo.v -ginkgo.progress -test.timeout 0 -test.failfast -ginkgo.failFast -ginkgo.focus='ScaleClientServerTrafficSplit'
+        run: go test ./tests/scale -test.v -ginkgo.v -ginkgo.progress -test.timeout 0 -test.failfast -ginkgo.failFast -ginkgo.focus='ScaleClientServerTrafficSplit' -testFolderName=testResults
+        continue-on-error: true
+      - name: Save results
+        uses: actions/upload-artifact@v2
+        with:
+          name: results
+          path: testResults/
+      - name: Comment test results on PR
+      uses: machine-learning-apps/pr-comment@master
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        path: testResults/cpu.png
