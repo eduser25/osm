@@ -110,7 +110,7 @@ func (sd *DataHandle) IterateTrackedPods(f func(pod *corev1.Pod)) {
 
 // Iterate wrapper to loop and track various resources across iterations (time, mem consumption, iteration num, etc.)
 func (sd *DataHandle) Iterate(f func()) {
-	for {
+	for i := 0; i < 3; i++ {
 		sd.ItStartTime = append(sd.ItStartTime, time.Now())
 		f()
 		sd.ItEndTime = append(sd.ItEndTime, time.Now())
