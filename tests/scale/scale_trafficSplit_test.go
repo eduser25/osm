@@ -21,6 +21,7 @@ var _ = Describe("Scales a setup with client-servers and traffic splits til fail
 
 		AfterEach(func() {
 			if sd != nil {
+				sd.ResultsOut = getOSMTestOutputFiles()
 				sd.WrapUp()
 			}
 		})

@@ -1,9 +1,16 @@
 package scale
 
 import (
+	"fmt"
+	"os"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	. "github.com/openservicemesh/osm/tests/framework"
+)
+
+const (
+	defaultFilename = "results.txt"
 )
 
 // Returns the OSM grafana dashboards of interest to save after the test
@@ -41,5 +48,20 @@ func getOSMTrackResources() []TrackedLabel {
 				},
 			},
 		},
+	}
+}
+
+// Get common outputs we are interested to print in
+func getOSMTestOutputFiles() []*os.File {
+	fName := Td.GetTestFile(defaultFilename)
+	f, err := os.Create(fName)
+	if err != nil {
+		fmt.Printf("Failed to open file: %v", err)
+		return nil
+	}
+
+	return []*os.File{
+		f,
+		os.Stdout,
 	}
 }
