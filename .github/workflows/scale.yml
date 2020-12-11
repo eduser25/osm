@@ -1,0 +1,111 @@
+name: ScaleOnDemand
+on:
+  issue_comment:
+    types: [created]
+env:
+  CTR_REGISTRY: ${{ secrets.ACR }}
+  CTR_REGISTRY_USER: ${{ secrets.ACRUSER }}
+  CTR_REGISTRY_PASSWORD: ${{ secrets.ACRPW }}
+  # CTR_TAG: latest  # defaulted
+jobs:
+  verify-comment:
+    name: Verify PR comment
+    runs-on: ubuntu-latest
+    steps:
+      # Validate someone wrote the right string
+      - uses: khan/pull-request-comment-trigger@1.0.0
+        id: check
+        with:
+          trigger: '/runScale'
+          reaction: rocket
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+      # Early exit
+      - run: 'exit -1'
+        if: steps.check.outputs.triggered == 'false'
+
+  run-scale-pipe:
+    name: Run Scale Pipeline
+    needs: verify-comment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add Start-Run comment to PR
+        env:
+          URL: ${{ github.event.issue.comments_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Scale run started, run can be seen [here](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)." > comment.txt
+          echo "{ \"body\" : $(cat comment.txt | jq -sR)}" > proto.json
+          curl \
+            -X POST \
+            $URL \
+            -H "Content-Type: text/json" \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -d @proto.json
+      
+      # Get the right branch information from the PR the request is coming from
+      - uses: xt0rted/pull-request-comment-branch@v1
+        id: comment-branch
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Checkout v1
+        uses: actions/checkout@v1
+      - name: Checkout v2
+        uses: actions/checkout@v2
+        with:
+          path: ~/go/pkg/mod
+          ref: ${{ steps.comment-branch.outputs.head_ref }}
+      - name: Restore Module Cache
+        uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-gomod2-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-gomod2-
+      - name: Restore Build Cache
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('**/*.go') }}
+      - name: Setup Go 1.15
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.15
+      - name: Build binaries
+        run: make build-osm
+      - name: Docker Login
+        run: docker login --username "$CTR_REGISTRY_USER" --password "$CTR_REGISTRY_PASSWORD" $CTR_REGISTRY
+      - name: Docker push
+        run: make docker-push-osm-controller docker-push-init docker-push-osm-injector
+      - uses: azure/k8s-set-context@v1
+        with:
+          method: kubeconfig
+          kubeconfig: ${{secrets.KUBECONF}}
+        id: setcontext
+      - name: Run Scale tests
+        run: go test ./tests/scale -test.v -ginkgo.v -ginkgo.progress -test.timeout 0 -test.failfast -ginkgo.failFast -ginkgo.focus='ScaleClientServerTrafficSplit' -testFolderName=testResults
+        # Scale tests never succeed per se
+        continue-on-error: true
+      - name: Save results
+        uses: actions/upload-artifact@v2
+        with:
+          name: results
+          path: ./tests/scale/testResults/
+      - name: Comment results on PR
+        env:
+          URL: ${{ github.event.issue.comments_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Scale [run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) results:" > comment.txt
+          echo "\`\`\`" >> comment.txt
+          cat ./tests/scale/testResults/results.txt >> comment.txt
+          echo "\`\`\`" >> comment.txt
+          echo "{ \"body\" : $(cat comment.txt | jq -sR)}" > proto.json
+          curl \
+            -X POST \
+            $URL \
+            -H "Content-Type: text/json" \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -d @proto.json
+
