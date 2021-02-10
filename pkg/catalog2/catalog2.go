@@ -18,10 +18,17 @@ type Catalog struct {
 	dataModelLock sync.RWMutex
 }
 
-// WithRlock is used to perform operation on the data model preventing writes from Notifications
+// WithRlock is used to perform operation on the data model preventing writes from updates
 func (c *Catalog) WithRlock(f func()) {
 	c.dataModelLock.RLock()
 	defer c.dataModelLock.RUnlock()
+	f()
+}
+
+// WithWlock is used by configurator thread to Write-lock the data-model when it needs to update it
+func (c *Catalog) WithWlock(f func()) {
+	c.dataModelLock.Lock()
+	defer c.dataModelLock.Unlock()
 	f()
 }
 

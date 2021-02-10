@@ -18,7 +18,8 @@ func (c *Catalog) GetService(svc service.MeshService) *corev1.Service {
 // IsMonitoredNamespace returns whether a namespace with the given name is being monitored
 // by the mesh
 func (c *Catalog) IsMonitoredNamespace(s string) bool {
-	return c.OriginalKubeController.IsMonitoredNamespace(s)
+	_, ok := c.dataModel.namespaces[s]
+	return ok
 }
 
 // ListMonitoredNamespaces returns the namespaces monitored by the mesh
