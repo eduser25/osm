@@ -9,6 +9,7 @@ import (
 	a "github.com/openservicemesh/osm/pkg/announcements"
 	"github.com/openservicemesh/osm/pkg/kubernetes/events"
 	"github.com/openservicemesh/osm/pkg/logger"
+	v1 "k8s.io/api/core/v1"
 )
 
 var (
@@ -126,8 +127,29 @@ func (c *Catalog) updateHandler() {
 // Update data model here
 func (c *Catalog) handleMessage(m *events.PubSubMessage) (mapset.Set, bool) {
 	switch m.AnnouncementType {
+	case a.NamespaceAdded, a.NamespaceUpdated, a.NamespaceDeleted:
+		return c.handleNamespaceMessage(m)
 	default:
 		// By default, assume we should trigger a global update
 		return mapset.NewSet(), true
 	}
+}
+
+func (c *Catalog) handleNamespaceMessage(m *events.PubSubMessage) (mapset.Set, bool) {
+	if m.AnnouncementType == a.NamespaceDeleted || m.AnnouncementType == a.NamespaceUpdated {
+		oldNs := m.OldObj.(*v1.Namespace)
+		c.WithWlock(func() {
+			delete(c.dataModel.namespaces, oldNs.Name)
+		})
+	}
+	if m.AnnouncementType == a.NamespaceAdded || m.AnnouncementType == a.NamespaceUpdated {
+		newNs := m.NewObj.(*v1.Namespace)
+		c.WithWlock(func() {
+			c.dataModel.namespaces[newNs.Name] = Namespace{
+				namespace: newNs,
+			}
+		})
+	}
+	// For now we are still updating all envoys
+	return mapset.NewSet(), true
 }
