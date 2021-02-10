@@ -26,6 +26,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/openservicemesh/osm/pkg/catalog"
+	"github.com/openservicemesh/osm/pkg/catalog2"
 	"github.com/openservicemesh/osm/pkg/certificate"
 	"github.com/openservicemesh/osm/pkg/configurator"
 	"github.com/openservicemesh/osm/pkg/constants"
@@ -180,15 +181,25 @@ func main() {
 	}
 	log.Info().Msgf("Initial ConfigMap %s: %s", osmConfigMapName, string(configMap))
 
+	// Catalog2 is a Module that implements smi.SMISpec, catalog.Meshspec and kubernetes.Controller interfaces
+	// For now it's just a shim layer that will pass the interface calls right through to the original objects.
+	// Current code has ensured all calls, including internal api calls from existing interfaces in original modules,
+	// will go through Catalog2 before hitting actual original implemnetations
+	newCatalog := catalog2.NewCatalog()
+
 	kubernetesClient, err := k8s.NewKubernetesController(kubeClient, meshName, stop)
 	if err != nil {
 		events.GenericEventRecorder().FatalEvent(err, events.InitializationError, "Error creating Kubernetes Controller")
 	}
+	newCatalog.OriginalKubeController = kubernetesClient
+	kubernetesClient.SelfReference = newCatalog
 
-	meshSpec, err := smi.NewMeshSpecClient(kubeConfig, kubeClient, osmNamespace, kubernetesClient, stop)
+	meshSpec, err := smi.NewMeshSpecClient(kubeConfig, kubeClient, osmNamespace, newCatalog, stop)
 	if err != nil {
 		events.GenericEventRecorder().FatalEvent(err, events.InitializationError, "Error creating MeshSpec")
 	}
+	newCatalog.OriginalSmi = &meshSpec
+	// Self reference is not needed for smi, luckily no API in smi calls onto itself
 
 	certManager, certDebugger, err := getCertificateManager(kubeClient, kubeConfig, cfg)
 	if err != nil {
@@ -204,30 +215,32 @@ func main() {
 		}
 	}
 
-	kubeProvider, err := kube.NewProvider(kubeClient, kubernetesClient, constants.KubeProviderName, cfg)
+	kubeProvider, err := kube.NewProvider(kubeClient, newCatalog, constants.KubeProviderName, cfg)
 	if err != nil {
 		events.GenericEventRecorder().FatalEvent(err, events.InitializationError, "Error creating Kubernetes endpoints provider")
 	}
 
 	endpointsProviders := []endpoint.Provider{kubeProvider}
 
-	ingressClient, err := ingress.NewIngressClient(kubeClient, kubernetesClient, stop, cfg)
+	ingressClient, err := ingress.NewIngressClient(kubeClient, newCatalog, stop, cfg)
 	if err != nil {
 		events.GenericEventRecorder().FatalEvent(err, events.InitializationError, "Error creating Ingress monitor client")
 	}
 
 	meshCatalog := catalog.NewMeshCatalog(
-		kubernetesClient,
+		newCatalog,
 		kubeClient,
-		meshSpec,
+		newCatalog,
 		certManager,
 		ingressClient,
 		stop,
 		cfg,
 		endpointsProviders...)
+	newCatalog.OriginalCatalog = meshCatalog
+	meshCatalog.SelfReference = newCatalog
 
 	// Create the sidecar-injector webhook
-	if err := injector.NewMutatingWebhook(injectorConfig, kubeClient, certManager, meshCatalog, kubernetesClient, meshName, osmNamespace, webhookConfigName, stop, cfg); err != nil {
+	if err := injector.NewMutatingWebhook(injectorConfig, kubeClient, certManager, newCatalog, newCatalog, meshName, osmNamespace, webhookConfigName, stop, cfg); err != nil {
 		events.GenericEventRecorder().FatalEvent(err, events.InitializationError, "Error creating sidecar injector webhook")
 	}
 
@@ -242,7 +255,7 @@ func main() {
 	}
 
 	// Create and start the ADS gRPC service
-	xdsServer := ads.NewADSServer(meshCatalog, cfg.IsDebugServerEnabled(), osmNamespace, cfg, certManager)
+	xdsServer := ads.NewADSServer(newCatalog, cfg.IsDebugServerEnabled(), osmNamespace, cfg, certManager)
 	if err := xdsServer.Start(ctx, cancel, *port, adsCert); err != nil {
 		events.GenericEventRecorder().FatalEvent(err, events.InitializationError, "Error initializing ADS server")
 	}
@@ -273,7 +286,7 @@ func main() {
 
 	// Create DebugServer and start its config event listener.
 	// Listener takes care to start and stop the debug server as appropriate
-	debugConfig := debugger.NewDebugConfig(certDebugger, xdsServer, meshCatalog, kubeConfig, kubeClient, cfg, kubernetesClient)
+	debugConfig := debugger.NewDebugConfig(certDebugger, xdsServer, meshCatalog, kubeConfig, kubeClient, cfg, newCatalog)
 	debugConfig.StartDebugServerConfigListener()
 
 	<-stop

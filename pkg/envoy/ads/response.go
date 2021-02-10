@@ -143,9 +143,13 @@ func (s *Server) newAggregatedDiscoveryResponse(proxy *envoy.Proxy, request *xds
 	if request.Node != nil {
 		nodeID = request.Node.Id
 	}
-
+	var response *xds_discovery.DiscoveryResponse
+	var err error
 	log.Trace().Msgf("Invoking handler for type %s; request from Envoy with Node ID %s", typeURL, nodeID)
-	response, err := handler(s.catalog, proxy, request, cfg, s.certManager)
+	// A read lock on the datamodel RW lock is aquired just once
+	s.catalog.WithRlock(func() {
+		response, err = handler(s.catalog, proxy, request, cfg, s.certManager)
+	})
 	if err != nil {
 		log.Error().Msgf("Responder for TypeUrl %s is not implemented", request.TypeUrl)
 		return nil, errCreatingResponse

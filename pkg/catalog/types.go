@@ -47,6 +47,12 @@ type MeshCatalog struct {
 	// lookups
 	kubeController k8s.Controller
 
+	// For overriding calls onto itself
+	// Some of the provided interfaces might issue other interface calls onto itself
+	// To make sure that a shim layer is overriding all implementation calls, we have to provide
+	// a way for individual interfaces to override the calls it will issue internally
+	SelfReference MeshCataloger
+
 	// Maintain a mapping of pod UID to CN of the Envoy on the given pod
 	podUIDToCN sync.Map
 
@@ -117,7 +123,7 @@ type MeshCataloger interface {
 	GetIngressRoutesPerHost(service.MeshService) (map[string][]trafficpolicy.HTTPRouteMatch, error)
 
 	// ListMonitoredNamespaces lists namespaces monitored by the control plane
-	ListMonitoredNamespaces() []string
+	ListMonitoredNamespaces() ([]string, error)
 
 	// GetTargetPortToProtocolMappingForService returns a mapping of the service's ports to their corresponding application protocol.
 	// The ports returned are the actual ports on which the application exposes the service derived from the service's endpoints,
@@ -131,7 +137,12 @@ type MeshCataloger interface {
 
 	// ListInboundTrafficTargetsWithRoutes returns a list traffic target objects composed of its routes for the given destination service account
 	ListInboundTrafficTargetsWithRoutes(service.K8sServiceAccount) ([]trafficpolicy.TrafficTargetWithRoutes, error)
+
+	// WithRlock allows calling with explicit top-level R/W locking, to avoid changes on the datastructures while reads are in progess
+	// on the datamodel
+	WithRlock(func())
 }
+
 type expectedProxy struct {
 	// The time the certificate, identified by CN, for the expected proxy was issued on
 	certificateIssuedAt time.Time

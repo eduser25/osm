@@ -64,6 +64,10 @@ type Client struct {
 	kubeClient  kubernetes.Interface
 	informers   InformerCollection
 	cacheSynced chan interface{}
+	// For overriding calls onto itself
+	// Some functions might make other interface/API calls in the same object
+	// This makes sure internal calls are also overriden if another interface is provided
+	SelfReference Controller
 }
 
 // Controller is the controller interface for K8s services

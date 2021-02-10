@@ -123,10 +123,10 @@ func (mc *MeshCatalog) ListAllowedOutboundServicesForIdentity(identity service.K
 	}
 
 	serviceSet := mapset.NewSet()
-	for _, t := range mc.meshSpec.ListTrafficTargets() { // loop through all traffic targets
+	for _, t := range mc.SelfReference.GetSMISpec().ListTrafficTargets() { // loop through all traffic targets
 		for _, source := range t.Spec.Sources {
 			if source.Name == identity.Name && source.Namespace == identity.Namespace { // found outbound
-				destServices, err := mc.GetServicesForServiceAccount(service.K8sServiceAccount{
+				destServices, err := mc.SelfReference.GetServicesForServiceAccount(service.K8sServiceAccount{
 					Name:      t.Spec.Destination.Name,
 					Namespace: t.Spec.Destination.Namespace,
 				})
@@ -158,7 +158,7 @@ func (mc *MeshCatalog) GetWeightedClusterForService(svc service.MeshService) (se
 	}
 
 	// Retrieve the weighted clusters from traffic split
-	servicesList := mc.meshSpec.ListTrafficSplitServices()
+	servicesList := mc.SelfReference.GetSMISpec().ListTrafficSplitServices()
 	for _, activeService := range servicesList {
 		if activeService.Service == svc {
 			return service.WeightedCluster{
@@ -190,7 +190,7 @@ func (mc *MeshCatalog) GetResolvableHostnamesForUpstreamService(downstream, upst
 
 	// If this service is referenced in a traffic split
 	// Retrieve the domain name from traffic split root service
-	servicesList := mc.meshSpec.ListTrafficSplitServices()
+	servicesList := mc.SelfReference.GetSMISpec().ListTrafficSplitServices()
 	for _, activeService := range servicesList {
 		if activeService.Service == upstream {
 			log.Trace().Msgf("Getting hostnames for upstream service %s", upstream)
@@ -412,7 +412,7 @@ func (mc *MeshCatalog) listTrafficTargetPermutations(trafficTarget access.Traffi
 		Name:      src.Name,
 	}
 
-	srcServiceList, srcErr := mc.GetServicesForServiceAccount(sourceServiceAccount)
+	srcServiceList, srcErr := mc.SelfReference.GetServicesForServiceAccount(sourceServiceAccount)
 	if srcErr != nil {
 		log.Error().Msgf("TrafficTarget %s/%s could not get source services for service account %s", trafficTarget.Namespace, trafficTarget.Name, sourceServiceAccount.String())
 		return nil, srcErr
@@ -422,7 +422,7 @@ func (mc *MeshCatalog) listTrafficTargetPermutations(trafficTarget access.Traffi
 		Namespace: dest.Namespace,
 		Name:      dest.Name,
 	}
-	destServiceList, destErr := mc.GetServicesForServiceAccount(dstNamespacedServiceAcc)
+	destServiceList, destErr := mc.SelfReference.GetServicesForServiceAccount(dstNamespacedServiceAcc)
 	if destErr != nil {
 		log.Error().Msgf("TrafficTarget %s/%s could not get destination services for service account %s", trafficTarget.Namespace, trafficTarget.Name, dstNamespacedServiceAcc.String())
 		return nil, destErr
@@ -480,7 +480,7 @@ func (mc *MeshCatalog) GetServicesForServiceAccounts(saList []service.K8sService
 	serviceMap := map[service.MeshService]bool{}
 
 	for _, sa := range saList {
-		services, err := mc.GetServicesForServiceAccount(sa)
+		services, err := mc.SelfReference.GetServicesForServiceAccount(sa)
 		if err != nil {
 			log.Error().Err(err).Msgf("Error getting services linked to Service Account %s", sa)
 			continue
@@ -529,7 +529,7 @@ func (mc *MeshCatalog) getDestinationServicesFromTrafficTarget(t *access.Traffic
 		Name:      t.Spec.Destination.Name,
 		Namespace: t.Spec.Destination.Namespace,
 	}
-	destServices, err := mc.GetServicesForServiceAccount(sa)
+	destServices, err := mc.SelfReference.GetServicesForServiceAccount(sa)
 	if err != nil {
 		return nil, errors.Errorf("Error finding Services for Service Account %#v: %v", sa, err)
 	}
