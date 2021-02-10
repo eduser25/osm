@@ -131,7 +131,8 @@ func (s *Server) newAggregatedDiscoveryResponse(proxy *envoy.Proxy, request *xds
 		return nil, errUnknownTypeURL
 	}
 
-	if s.enableDebug {
+	// Disabling for now. I fixed the race on ToT, needs rebase
+	if false {
 		if _, ok := s.xdsLog[proxy.GetCertificateCommonName()]; !ok {
 			s.xdsLog[proxy.GetCertificateCommonName()] = make(map[envoy.TypeURI][]time.Time)
 		}

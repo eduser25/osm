@@ -51,10 +51,14 @@ func (s *Server) StreamAggregatedResources(server xds_discovery.AggregatedDiscov
 	// Register to Envoy global broadcast updates
 	broadcastUpdate := events.GetPubSubInstance().Subscribe(announcements.ProxyBroadcast)
 
-	// Issues a send all response on a connecting envoy
-	// If this were to fail, it most likely just means we still have configuration being applied on flight,
-	// which will get triggered by the dispatcher anyway
-	s.sendAllResponses(proxy, &server, s.cfg)
+	// New dispatcher notifications available, dispatcher will take care to schedule update for this proxy
+	events.GetPubSubInstance().Publish(events.PubSubMessage{
+		AnnouncementType: announcements.ProxyAdded,
+		OldObj:           nil,
+		NewObj:           proxy,
+	})
+
+	retryChan := make(chan struct{}, 1)
 
 	for {
 		select {
@@ -82,6 +86,9 @@ func (s *Server) StreamAggregatedResources(server xds_discovery.AggregatedDiscov
 				log.Error().Msgf("[NACK] DiscoveryRequest error from Envoy with xDS Certificate SerialNumber=%s on Pod with UID=%s: %s",
 					proxy.GetCertificateSerialNumber(), proxy.GetPodUID(), discoveryRequest.ErrorDetail)
 				// NOTE(draychev): We could also return errEnvoyError - but it seems appropriate to also ignore this request and continue on.
+				// We have some nasty RDS failures that can cause an envoy to not get properly updated
+				// This is a dirty workaround to make sure an envoy is retried upon failure til we debug and fix the real issue
+				retryChan <- struct{}{}
 				continue
 			}
 
@@ -166,6 +173,10 @@ func (s *Server) StreamAggregatedResources(server xds_discovery.AggregatedDiscov
 		case <-proxy.GetAnnouncementsChannel():
 			log.Debug().Msgf("Individual update for Envoy with xDS Certificate SerialNumber=%s on Pod with UID=%s", proxy.GetCertificateSerialNumber(), proxy.GetPodUID())
 			s.sendAllResponses(proxy, &server, s.cfg)
+		case <-retryChan:
+			log.Info().Msgf("Will retry bc of NACK %s", proxy.GetCertificateCommonName())
+			s.sendAllResponses(proxy, &server, s.cfg)
 		}
+
 	}
 }

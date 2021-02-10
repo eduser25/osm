@@ -136,7 +136,7 @@ func NewProxy(certCommonName certificate.CommonName, certSerialNumber certificat
 
 		connectedAt: time.Now(),
 
-		announcements:      make(chan announcements.Announcement),
+		announcements:      make(chan announcements.Announcement, 1),
 		lastNonce:          make(map[TypeURI]string),
 		lastSentVersion:    make(map[TypeURI]uint64),
 		lastAppliedVersion: make(map[TypeURI]uint64),

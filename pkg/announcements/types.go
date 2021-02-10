@@ -23,6 +23,15 @@ const (
 	// PodUpdated is the type of announcement emitted when we observe an update to a Kubernetes Pod
 	PodUpdated AnnouncementType = "pod-updated"
 
+	// ProxyAdded
+	ProxyAdded AnnouncementType = "proxy-added"
+
+	// ProxyDeleted
+	ProxyDeleted AnnouncementType = "proxy-deleted"
+
+	// ProxyUpdated
+	ProxyUpdated AnnouncementType = "proxy-updated"
+
 	// ---
 
 	// EndpointAdded is the type of announcement emitted when we observe an addition of a Kubernetes Endpoint
