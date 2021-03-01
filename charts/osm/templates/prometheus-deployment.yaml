@@ -32,10 +32,10 @@ spec:
         imagePullPolicy: IfNotPresent
         resources:
           limits:
-            cpu: 500m
-            memory: 2G
+            cpu: 2
+            memory: 4G
           requests:
-            cpu: 100m
+            cpu: 1
             memory: 256M
         volumeMounts:
         - mountPath: /etc/prometheus/

@@ -23,6 +23,9 @@ var _ = OSMDescribe("1 Client pod -> 1 Server pod test using cert-manager",
 
 			It("Tests HTTP traffic for client pod -> server pod", func() {
 				// Install OSM
+				if Td.InstType == NoInstall {
+					Skip("Do not try cert-manager on addon")
+				}
 				installOpts := Td.GetOSMInstallOpts()
 				installOpts.CertManager = "cert-manager"
 				Expect(Td.InstallOSM(installOpts)).To(Succeed())

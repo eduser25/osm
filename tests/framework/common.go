@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"math/big"
 	"os"
@@ -31,6 +32,7 @@ import (
 	helmcli "helm.sh/helm/v3/pkg/cli"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -105,9 +107,9 @@ var (
 	// default deploy Fluentbit
 	defaultDeployFluentbit = false
 	// default envoy loglevel
-	defaultEnvoyLogLevel = "debug"
+	defaultEnvoyLogLevel = "error"
 	// default OSM loglevel
-	defaultOSMLogLevel = "trace"
+	defaultOSMLogLevel = "error"
 	// Test folder base default value
 	testFolderBase = "/tmp"
 )
@@ -164,12 +166,14 @@ const (
 	CollectLogsIfErrorOnly CollectLogsType = "ifError"
 	// NoCollectLogs will not collect logs
 	NoCollectLogs CollectLogsType = "no"
+	// ctl only
+	ControlPlaneOnly CollectLogsType = "ctlOnly"
 )
 
 // Verifies the instType string flag option is a valid enum type
 func verifyValidCollectLogs(t CollectLogsType) error {
 	switch t {
-	case CollectLogs, CollectLogsIfErrorOnly, NoCollectLogs:
+	case CollectLogs, CollectLogsIfErrorOnly, NoCollectLogs, ControlPlaneOnly:
 		return nil
 	default:
 		return errors.Errorf("%s is not a valid CollectLogsType (%s, %s, %s)",
@@ -532,6 +536,11 @@ func (td *OsmTestData) InstallOSM(instOpts InstallOSMOpts) error {
 			fmt.Sprintf("%t", instOpts.EnableDebugServer))
 		if err != nil {
 			return err
+		}
+
+		// Check if we are using any specific creds
+		if td.AreRegistryCredsPresent() {
+			td.CreateDockerRegistrySecret(td.OsmNamespace)
 		}
 		return nil
 	}
@@ -1237,7 +1246,7 @@ func (td *OsmTestData) Cleanup(ct CleanupType) {
 
 	// If collect logs or
 	// (test failed, by either restarts were seen or because spec failed) and (collect logs on error)
-	if td.CollectLogs == CollectLogs ||
+	if td.CollectLogs == CollectLogs || td.CollectLogs == ControlPlaneOnly ||
 		((restartSeen && !td.IgnoreRestarts) || CurrentGinkgoTestDescription().Failed) && td.CollectLogs == CollectLogsIfErrorOnly {
 		// Grab logs. We will move this to use CLI when able.
 		if err := td.GrabLogs(); err != nil {
@@ -1350,6 +1359,11 @@ func (td *OsmTestData) CreateDockerRegistrySecret(ns string) {
 
 	td.T.Logf("Pushing Registry secret '%s' for namespace %s... ", registrySecretName, ns)
 	_, err := td.Client.CoreV1().Secrets(ns).Create(context.Background(), secret, metav1.CreateOptions{})
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			_, err = td.Client.CoreV1().Secrets(ns).Update(context.Background(), secret, metav1.UpdateOptions{})
+		}
+	}
 	if err != nil {
 		td.T.Fatalf("Could not add registry secret")
 	}
@@ -1470,7 +1484,20 @@ func (td *OsmTestData) GrabLogs() error {
 		}
 	}
 
-	// TODO: Eventually a CLI command should implement collection of configurations necessary for debugging
+	stdout, stderr, err = td.RunLocal("kubectl", []string{"get", "events", "-A"})
+	if err != nil {
+		td.T.Logf("error running kubectl get events")
+		td.T.Logf("stdout:\n%s", stdout)
+		td.T.Logf("stderr:\n%s", stderr)
+	} else {
+		ioutil.WriteFile(fmt.Sprintf("%s/%s", absTestDirPath, "events"), stdout.Bytes(), 0644)
+	}
+
+	if td.CollectLogs == ControlPlaneOnly {
+		return nil
+	}
+
+	//TODO: Eventually a CLI command should implement collection of configurations necessary for debugging
 	pods, err := td.Client.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{
 		// Reliable way to select injected pods
 		LabelSelector: "osm-proxy-uuid",

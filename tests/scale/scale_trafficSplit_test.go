@@ -29,6 +29,7 @@ var _ = Describe("Scales a setup with client-servers and traffic splits til fail
 		It("Tests HTTP traffic from Clients to the traffic split Cluster IP", func() {
 			// Install OSM with all the requirements
 			var err error
+			Td.CollectLogs = ControlPlaneOnly
 			sd, err = scaleOSMInstall()
 			Expect(err).To(BeNil())
 

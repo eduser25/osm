@@ -31,6 +31,9 @@ var _ = OSMDescribe("Test traffic split where root service is same as backend se
 	})
 
 func testRecursiveTrafficSplit(appProtocol string) {
+	if appProtocol == AppProtocolTCP {
+		Td.T.Skip("skipping")
+	}
 	defer GinkgoRecover()
 	const (
 		// to name the header we will use to identify the server that replies
