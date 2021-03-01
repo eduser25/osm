@@ -1,0 +1,76 @@
+name: Scale on demand
+on:
+  workflow_dispatch:  # click the button on Github repo!
+
+env:
+  CTR_REGISTRY: ${{ secrets.ACR }}
+  CTR_REGISTRY_USER: ${{ secrets.ACRUSER }}
+  CTR_REGISTRY_PASSWORD: ${{ secrets.ACRPW }}
+  # CTR_TAG: latest  # defaulted
+
+# AZURE_CREDENTIALS -> Azure credentials: https://github.com/Azure/login#configure-deployment-credentials
+# AZ_RESOURCE_GROUP -> Resource group: needs to be created
+
+jobs:
+  nightly-scale-run:
+    name: Run Scale Pipeline
+    runs-on: ubuntu-latest
+    steps:
+    # Setup cluster
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Create scale cluster
+        run: az aks create --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --name scale-ondemand-$GITHUB_RUN_ID --generate-ssh-keys --nodepool-name osmscalepool --node-count 8 --max-pods 250 --node-vm-size Standard_D4s_v3
+      - name: Set Kube Context
+        run: az aks get-credentials --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --name scale-ondemand-$GITHUB_RUN_ID 
+      # - uses: azure/k8s-set-context@v1
+      #   with:
+      #     method: kubeconfig
+      #     kubeconfig: ${{secrets.KUBECONF}}
+      #   id: setcontext
+      
+      - name: Checkout v2
+        uses: actions/checkout@v2
+      - name: Checkout v2
+        uses: actions/checkout@v2
+        with:
+          path: ~/go/pkg/mod
+      - name: Restore Module Cache
+        uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-gomod2-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-gomod2-
+      - name: Restore Build Cache
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('**/*.go') }}
+      - name: Setup Go 1.15
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.15
+      - name: Build binaries
+        run: make build-osm
+      - name: Docker Login
+        run: docker login --username "$CTR_REGISTRY_USER" --password "$CTR_REGISTRY_PASSWORD" $CTR_REGISTRY
+      - name: Docker push
+        run: make docker-push-osm-controller docker-push-init docker-push-osm-injector
+      - name: Run Scale tests
+        run: go test ./tests/scale -test.v -ginkgo.v -ginkgo.progress -test.timeout 0 -test.failfast -ginkgo.failFast -ginkgo.focus='ScaleClientServerTrafficSplit'
+        # Scale tests never succeed per se
+        continue-on-error: true
+      - name: Save results on Github
+        uses: actions/upload-artifact@v2
+        with:
+          name: results
+          path: /tmp/test**/*
+      
+      # Clean up cluster, always run
+      - name: Delete Cluster
+        if: ${{ always() }}
+        run: az aks delete --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --name scale-ondemand-$GITHUB_RUN_ID --yes
+  
