@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"math/big"
 	"os"
@@ -105,9 +106,9 @@ var (
 	// default deploy Fluentbit
 	defaultDeployFluentbit = false
 	// default envoy loglevel
-	defaultEnvoyLogLevel = "debug"
+	defaultEnvoyLogLevel = "error"
 	// default OSM loglevel
-	defaultOSMLogLevel = "trace"
+	defaultOSMLogLevel = "error"
 	// Test folder base default value
 	testFolderBase = "/tmp"
 )
@@ -1470,61 +1471,70 @@ func (td *OsmTestData) GrabLogs() error {
 		}
 	}
 
-	// TODO: Eventually a CLI command should implement collection of configurations necessary for debugging
-	pods, err := td.Client.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{
-		// Reliable way to select injected pods
-		LabelSelector: "osm-proxy-uuid",
-	})
-
+	stdout, stderr, err = td.RunLocal("kubectl", []string{"get", "events", "-A"})
 	if err != nil {
-		return err
+		td.T.Logf("error running kubectl get events")
+		td.T.Logf("stdout:\n%s", stdout)
+		td.T.Logf("stderr:\n%s", stderr)
+	} else {
+		ioutil.WriteFile(fmt.Sprintf("%s/%s", absTestDirPath, "events"), stdout.Bytes(), 0644)
 	}
 
-	envoyConfDir := td.GetTestFilePath("envoy_configs")
-	err = os.Mkdir(envoyConfDir, 0750)
-	if err != nil && !os.IsExist(err) {
-		td.T.Logf("Error on creating dir for %s: %v", envoyConfDir, err)
-		return err
-	}
+	// TODO: Eventually a CLI command should implement collection of configurations necessary for debugging
+	// pods, err := td.Client.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{
+	// 	// Reliable way to select injected pods
+	// 	LabelSelector: "osm-proxy-uuid",
+	// })
 
-	for _, pod := range pods.Items {
-		podEnvoyConfigFilepath := strings.Join([]string{envoyConfDir, fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)}, "/")
-		err := os.Mkdir(podEnvoyConfigFilepath, 0750)
-		if err != nil && !os.IsExist(err) {
-			td.T.Logf("Error on creating dir for %s: %v, skipping", podEnvoyConfigFilepath, err)
-			continue
-		}
+	// if err != nil {
+	// 	return err
+	// }
 
-		envoyDebugPaths := []string{
-			"config_dump",
-			"clusters",
-			"certs",
-			"listeners",
-			"ready",
-			"stats",
-		}
+	// envoyConfDir := td.GetTestFilePath("envoy_configs")
+	// err = os.Mkdir(envoyConfDir, 0750)
+	// if err != nil && !os.IsExist(err) {
+	// 	td.T.Logf("Error on creating dir for %s: %v", envoyConfDir, err)
+	// 	return err
+	// }
 
-		for _, dbgEnvoyPath := range envoyDebugPaths {
-			cmd := "../../bin/osm"
-			args := []string{
-				"proxy",
-				"get",
-				dbgEnvoyPath,
-				pod.Name,
-				"--namespace",
-				pod.Namespace,
-				"-f",
-				strings.Join([]string{podEnvoyConfigFilepath, fmt.Sprintf("%s.txt", dbgEnvoyPath)}, "/"),
-			}
+	// for _, pod := range pods.Items {
+	// 	podEnvoyConfigFilepath := strings.Join([]string{envoyConfDir, fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)}, "/")
+	// 	err := os.Mkdir(podEnvoyConfigFilepath, 0750)
+	// 	if err != nil && !os.IsExist(err) {
+	// 		td.T.Logf("Error on creating dir for %s: %v, skipping", podEnvoyConfigFilepath, err)
+	// 		continue
+	// 	}
 
-			stdout, stderr, err := td.RunLocal(cmd, args)
-			if err != nil {
-				td.T.Logf("error running cmd: %s args: %v", cmd, args)
-				td.T.Logf("stdout:\n%s", stdout)
-				td.T.Logf("stderr:\n%s", stderr)
-			}
-		}
-	}
+	// 	envoyDebugPaths := []string{
+	// 		"config_dump",
+	// 		"clusters",
+	// 		"certs",
+	// 		"listeners",
+	// 		"ready",
+	// 		"stats",
+	// 	}
+
+	// 	for _, dbgEnvoyPath := range envoyDebugPaths {
+	// 		cmd := "../../bin/osm"
+	// 		args := []string{
+	// 			"proxy",
+	// 			"get",
+	// 			dbgEnvoyPath,
+	// 			pod.Name,
+	// 			"--namespace",
+	// 			pod.Namespace,
+	// 			"-f",
+	// 			strings.Join([]string{podEnvoyConfigFilepath, fmt.Sprintf("%s.txt", dbgEnvoyPath)}, "/"),
+	// 		}
+
+	// 		stdout, stderr, err := td.RunLocal(cmd, args)
+	// 		if err != nil {
+	// 			td.T.Logf("error running cmd: %s args: %v", cmd, args)
+	// 			td.T.Logf("stdout:\n%s", stdout)
+	// 			td.T.Logf("stderr:\n%s", stderr)
+	// 		}
+	// 	}
+	// }
 
 	return nil
 }
