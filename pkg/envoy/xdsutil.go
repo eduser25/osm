@@ -203,7 +203,7 @@ func getCommonTLSContext(tlsSDSCert, peerValidationSDSCert SDSCert) *xds_auth.Co
 	// Disable the fetch timeout so that Envoy doesn't ignore fetching the TLS secrets after
 	// the default timeout interval. These secrets should always be available for the proxy
 	// to fetch from the controller.
-	sdsConfigSource.InitialFetchTimeout = ptypes.DurationProto(0 * time.Second)
+	sdsConfigSource.InitialFetchTimeout = ptypes.DurationProto(15 * time.Second)
 
 	return &xds_auth.CommonTlsContext{
 		TlsParams: GetTLSParams(),
