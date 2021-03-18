@@ -128,7 +128,7 @@ var _ = Describe("Test ADS response functions", func() {
 				envoy.TypeLDS,
 				envoy.TypeRDS,
 				envoy.TypeSDS),
-				proxy, &server, nil, mockConfigurator)
+				proxy, nil, mockConfigurator)
 			Expect(err).To(BeNil())
 			Expect(actualResponses).ToNot(BeNil())
 			Expect(len(*actualResponses)).To(Equal(5))

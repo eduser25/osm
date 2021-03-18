@@ -8,11 +8,15 @@ import (
 	xds_discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 
+	cachev3 "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
+	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
 	"github.com/openservicemesh/osm/pkg/catalog"
 	"github.com/openservicemesh/osm/pkg/certificate"
 	"github.com/openservicemesh/osm/pkg/configurator"
 	"github.com/openservicemesh/osm/pkg/envoy"
+	k8s "github.com/openservicemesh/osm/pkg/kubernetes"
 	"github.com/openservicemesh/osm/pkg/logger"
+	"github.com/openservicemesh/osm/pkg/workerpool"
 )
 
 var (
@@ -29,4 +33,10 @@ type Server struct {
 	cfg            configurator.Configurator
 	certManager    certificate.Manager
 	ready          bool
+	wp             *workerpool.WorkerPool
+	kubeController k8s.Controller
+	ch             cachev3.SnapshotCache
+	srv            serverv3.Server
+	mtx            sync.Mutex
+	configVersion  map[string]uint64
 }

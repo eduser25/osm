@@ -215,7 +215,7 @@ func main() {
 	}
 
 	// Create and start the ADS gRPC service
-	xdsServer := ads.NewADSServer(meshCatalog, cfg.IsDebugServerEnabled(), osmNamespace, cfg, certManager)
+	xdsServer := ads.NewADSServer(meshCatalog, cfg.IsDebugServerEnabled(), osmNamespace, cfg, certManager, kubernetesClient)
 	if err := xdsServer.Start(ctx, cancel, *port, adsCert); err != nil {
 		events.GenericEventRecorder().FatalEvent(err, events.InitializationError, "Error initializing ADS server")
 	}

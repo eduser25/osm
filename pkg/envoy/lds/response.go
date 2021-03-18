@@ -1,6 +1,7 @@
 package lds
 
 import (
+	xds_listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	xds_discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 
@@ -62,6 +63,7 @@ func NewResponse(meshCatalog catalog.MeshCataloger, proxy *envoy.Proxy, _ *xds_d
 	for _, proxyService := range svcList {
 		// Create in-mesh filter chains
 		inboundSvcFilterChains := lb.getInboundMeshFilterChains(proxyService)
+		//log.Warn().Msgf("INBOUND FILTER CHAINS: %v", inboundSvcFilterChains)
 		inboundListener.FilterChains = append(inboundListener.FilterChains, inboundSvcFilterChains...)
 
 		// Create ingress filter chains if there are any ingress routes
@@ -78,6 +80,10 @@ func NewResponse(meshCatalog catalog.MeshCataloger, proxy *envoy.Proxy, _ *xds_d
 				log.Trace().Msgf("There is no k8s Ingress for service %s", proxyService)
 			}
 		}
+	}
+
+	if svcList[0].Name == "client" {
+		inboundListener.FilterChains = []*xds_listener.FilterChain{}
 	}
 
 	if len(inboundListener.FilterChains) > 0 {

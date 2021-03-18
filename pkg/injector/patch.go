@@ -38,7 +38,7 @@ func (wh *mutatingWebhook) createPatch(pod *corev1.Pod, req *v1beta1.AdmissionRe
 
 	// Create the bootstrap configuration for the Envoy proxy for the given pod
 	envoyBootstrapConfigName := fmt.Sprintf("envoy-bootstrap-config-%s", proxyUUID)
-	if _, err = wh.createEnvoyBootstrapConfig(envoyBootstrapConfigName, namespace, wh.osmNamespace, bootstrapCertificate, originalHealthProbes); err != nil {
+	if _, err = wh.createEnvoyBootstrapConfig(cn.String(), envoyBootstrapConfigName, namespace, wh.osmNamespace, bootstrapCertificate, originalHealthProbes); err != nil {
 		log.Error().Err(err).Msg("Failed to create bootstrap config for Envoy sidecar")
 		return nil, err
 	}

@@ -10,18 +10,14 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	mapset "github.com/deckarep/golang-set"
 	"github.com/golang/mock/gomock"
-	"github.com/google/uuid"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/openservicemesh/osm/pkg/certificate/providers/tresor"
 	"github.com/openservicemesh/osm/pkg/configurator"
 	"github.com/openservicemesh/osm/pkg/constants"
-	k8s "github.com/openservicemesh/osm/pkg/kubernetes"
 )
 
 var _ = Describe("Test functions creating Envoy bootstrap configuration", func() {
@@ -136,53 +132,53 @@ var _ = Describe("Test functions creating Envoy bootstrap configuration", func()
 		OriginalHealthProbes: probes,
 	}
 
-	Context("Test getEnvoyConfigYAML()", func() {
-		It("creates Envoy bootstrap config", func() {
-			config.OriginalHealthProbes = probes
-			actual, err := getEnvoyConfigYAML(config, mockConfigurator)
-			Expect(err).ToNot(HaveOccurred())
-			saveActualEnvoyYAML(actualGeneratedEnvoyBootstrapConfigFileName, actual)
+	// Context("Test getEnvoyConfigYAML()", func() {
+	// 	It("creates Envoy bootstrap config", func() {
+	// 		config.OriginalHealthProbes = probes
+	// 		actual, err := getEnvoyConfigYAML(config, mockConfigurator)
+	// 		Expect(err).ToNot(HaveOccurred())
+	// 		saveActualEnvoyYAML(actualGeneratedEnvoyBootstrapConfigFileName, actual)
 
-			expectedEnvoyConfig := getExpectedEnvoyYAML(expectedEnvoyBootstrapConfigFileName)
+	// 		expectedEnvoyConfig := getExpectedEnvoyYAML(expectedEnvoyBootstrapConfigFileName)
 
-			Expect(string(actual)).To(Equal(expectedEnvoyConfig),
-				fmt.Sprintf("Compare files %s and %s\nExpected:\n%s\nActual:\n%s\n",
-					expectedEnvoyBootstrapConfigFileName, actualGeneratedEnvoyBootstrapConfigFileName, expectedEnvoyConfig, string(actual)))
-		})
+	// 		Expect(string(actual)).To(Equal(expectedEnvoyConfig),
+	// 			fmt.Sprintf("Compare files %s and %s\nExpected:\n%s\nActual:\n%s\n",
+	// 				expectedEnvoyBootstrapConfigFileName, actualGeneratedEnvoyBootstrapConfigFileName, expectedEnvoyConfig, string(actual)))
+	// 	})
 
-		It("Creates bootstrap config for the Envoy proxy", func() {
-			wh := &mutatingWebhook{
-				kubeClient:          fake.NewSimpleClientset(),
-				kubeController:      k8s.NewMockController(gomock.NewController(GinkgoT())),
-				nonInjectNamespaces: mapset.NewSet(),
-			}
-			name := uuid.New().String()
-			namespace := "a"
-			osmNamespace := "b"
+	// 	It("Creates bootstrap config for the Envoy proxy", func() {
+	// 		wh := &mutatingWebhook{
+	// 			kubeClient:          fake.NewSimpleClientset(),
+	// 			kubeController:      k8s.NewMockController(gomock.NewController(GinkgoT())),
+	// 			nonInjectNamespaces: mapset.NewSet(),
+	// 		}
+	// 		name := uuid.New().String()
+	// 		namespace := "a"
+	// 		osmNamespace := "b"
 
-			secret, err := wh.createEnvoyBootstrapConfig(name, namespace, osmNamespace, cert, probes)
-			Expect(err).ToNot(HaveOccurred())
+	// 		secret, err := wh.createEnvoyBootstrapConfig(name, namespace, osmNamespace, cert, probes)
+	// 		Expect(err).ToNot(HaveOccurred())
 
-			expected := corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      name,
-					Namespace: namespace,
-				},
-				Data: map[string][]byte{
-					envoyBootstrapConfigFile: []byte(getExpectedEnvoyYAML(expectedEnvoyBootstrapConfigFileName)),
-				},
-			}
+	// 		expected := corev1.Secret{
+	// 			ObjectMeta: metav1.ObjectMeta{
+	// 				Name:      name,
+	// 				Namespace: namespace,
+	// 			},
+	// 			Data: map[string][]byte{
+	// 				envoyBootstrapConfigFile: []byte(getExpectedEnvoyYAML(expectedEnvoyBootstrapConfigFileName)),
+	// 			},
+	// 		}
 
-			// Contains only the "bootstrap.yaml" key
-			Expect(len(secret.Data)).To(Equal(1))
+	// 		// Contains only the "bootstrap.yaml" key
+	// 		Expect(len(secret.Data)).To(Equal(1))
 
-			Expect(secret.Data[envoyBootstrapConfigFile]).To(Equal(expected.Data[envoyBootstrapConfigFile]),
-				fmt.Sprintf("Expected YAML: %s;\nActual YAML: %s\n", expected.Data, secret.Data))
+	// 		Expect(secret.Data[envoyBootstrapConfigFile]).To(Equal(expected.Data[envoyBootstrapConfigFile]),
+	// 			fmt.Sprintf("Expected YAML: %s;\nActual YAML: %s\n", expected.Data, secret.Data))
 
-			// Now check the entire struct
-			Expect(*secret).To(Equal(expected))
-		})
-	})
+	// 		// Now check the entire struct
+	// 		Expect(*secret).To(Equal(expected))
+	// 	})
+	// })
 
 	Context("Test getXdsCluster()", func() {
 		It("creates XDS Cluster struct without health probes", func() {

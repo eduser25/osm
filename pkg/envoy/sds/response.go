@@ -94,6 +94,7 @@ func (s *sdsImpl) getSDSSecrets(cert certificate.Certificater, requestedCerts []
 					requestedCertificate, proxy.GetCertificateSerialNumber(), proxy.GetPodUID())
 				continue
 			}
+			//log.Warn().Msgf("ROOT: %v", envoySecret)
 			certs = append(certs, envoySecret)
 		}
 	}

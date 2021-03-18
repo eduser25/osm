@@ -1,12 +1,14 @@
 package ads
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
 	xds_discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
+	"github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -57,7 +59,6 @@ func (s *Server) getXDSResource(tURI envoy.TypeURI, proxy *envoy.Proxy,
 // If no DiscoveryRequest is passed, an empty one for the TypeURI is created
 func (s *Server) sendResponse(typeURIsToSend mapset.Set,
 	proxy *envoy.Proxy,
-	server *xds_discovery.AggregatedDiscoveryService_StreamAggregatedResourcesServer,
 	request *xds_discovery.DiscoveryRequest,
 	cfg configurator.Configurator) error {
 	success := true
@@ -101,10 +102,43 @@ func (s *Server) sendResponse(typeURIsToSend mapset.Set,
 		resourceMap[typeURI] = resources
 	}
 
-	// Send these to the proxy server
-	err := s.sendToServer(proxy, server, resourceMap)
+	// Using a single map to keep track of config version per proxy
+	// (the one on proxy can't be used anymore as we create a proxy struct every time)
+	// multiple routines can read/write, locking is needed
+	s.mtx.Lock()
+	s.configVersion[proxy.GetCertificateCommonName().String()]++
+	s.mtx.Unlock()
 
-	return err
+	snapshot := cache.NewSnapshot(
+		fmt.Sprintf("%d", s.configVersion[proxy.GetCertificateCommonName().String()]),
+		resourceMap[envoy.TypeEDS],
+		resourceMap[envoy.TypeCDS],
+		resourceMap[envoy.TypeRDS],
+		resourceMap[envoy.TypeLDS],
+		[]types.Resource{},
+		resourceMap[envoy.TypeSDS],
+	)
+
+	log.Info().Msgf("Proxy %s:", proxy.GetCertificateCommonName())
+	for _, url := range envoy.XDSResponseOrder {
+		res := snapshot.GetResources(url.String())
+		slice := []string{}
+		for key := range res {
+			slice = append(slice, key)
+		}
+		log.Info().Msgf("[%s] res: %v", envoy.XDSShortURINames[url], slice)
+	}
+
+	if err := snapshot.Consistent(); err != nil {
+		log.Info().Msgf("SNAPSHOT NOT consistent: %v", err)
+	}
+
+	err := s.ch.SetSnapshot(proxy.GetCertificateCommonName().String(), snapshot)
+	if err != nil {
+		log.Error().Err(err).Msgf("ERROR STORING IN CACHE")
+	}
+
+	return nil
 }
 
 // makeRequestForAllSecrets constructs an SDS request AS IF an Envoy proxy sent it.
@@ -124,21 +158,21 @@ func makeRequestForAllSecrets(proxy *envoy.Proxy, meshCatalog catalog.MeshCatalo
 				Name:     proxyIdentity.String(),
 				CertType: envoy.ServiceCertType,
 			}.String(),
-			envoy.SDSCert{
-				Name:     proxyIdentity.String(),
-				CertType: envoy.RootCertTypeForMTLSInbound,
-			}.String(),
-			envoy.SDSCert{
-				Name:     proxyIdentity.String(),
-				CertType: envoy.RootCertTypeForHTTPS,
-			}.String(),
 		},
 		TypeUrl: string(envoy.TypeSDS),
+	}
+
+	if proxyIdentity.Name != "client" {
+		discoveryRequest.ResourceNames = append(discoveryRequest.ResourceNames, envoy.SDSCert{
+			Name:     proxyIdentity.String(),
+			CertType: envoy.RootCertTypeForMTLSInbound,
+		}.String())
 	}
 
 	// There is an SDS validation cert corresponding to each upstream service.
 	// Each cert is used to validate the certificate presented by the corresponding upstream service.
 	upstreamServices := meshCatalog.ListAllowedOutboundServicesForIdentity(proxyIdentity)
+	log.Warn().Msgf("SDS ALLOWED UPSTREAM for src %s : %v", proxyIdentity.String(), len(upstreamServices))
 	for _, upstream := range upstreamServices {
 		upstreamRootCertResource := envoy.SDSCert{
 			Name:     upstream.String(),
@@ -147,6 +181,7 @@ func makeRequestForAllSecrets(proxy *envoy.Proxy, meshCatalog catalog.MeshCatalo
 		discoveryRequest.ResourceNames = append(discoveryRequest.ResourceNames, upstreamRootCertResource)
 	}
 
+	log.Warn().Msgf("SDS SECRETS THAT WILL GENERATE for %s : %v", proxyIdentity.String(), discoveryRequest.ResourceNames)
 	return discoveryRequest
 }
 

@@ -15,8 +15,11 @@ import (
 	"github.com/openservicemesh/osm/pkg/constants"
 )
 
-func getEnvoyConfigYAML(config envoyBootstrapConfigMeta, cfg configurator.Configurator) ([]byte, error) {
+func getEnvoyConfigYAML(cn string, config envoyBootstrapConfigMeta, cfg configurator.Configurator) ([]byte, error) {
 	m := map[interface{}]interface{}{
+		"node": map[string]interface{}{
+			"id": cn,
+		},
 		"admin": map[string]interface{}{
 			"access_log_path": "/dev/stdout",
 			"address": map[string]interface{}{
@@ -38,7 +41,7 @@ func getEnvoyConfigYAML(config envoyBootstrapConfigMeta, cfg configurator.Config
 						},
 					},
 				},
-				"set_node_on_first_message_only": true,
+				"set_node_on_first_message_only": false,
 			},
 			"cds_config": map[string]interface{}{
 				"ads":                  map[string]string{},
@@ -101,7 +104,7 @@ func getStaticResources(config envoyBootstrapConfigMeta) map[string]interface{} 
 	return staticResources
 }
 
-func (wh *mutatingWebhook) createEnvoyBootstrapConfig(name, namespace, osmNamespace string, cert certificate.Certificater, originalHealthProbes healthProbes) (*corev1.Secret, error) {
+func (wh *mutatingWebhook) createEnvoyBootstrapConfig(cn string, name, namespace, osmNamespace string, cert certificate.Certificater, originalHealthProbes healthProbes) (*corev1.Secret, error) {
 	configMeta := envoyBootstrapConfigMeta{
 		EnvoyAdminPort: constants.EnvoyAdminPort,
 		XDSClusterName: constants.OSMControllerName,
@@ -117,7 +120,7 @@ func (wh *mutatingWebhook) createEnvoyBootstrapConfig(name, namespace, osmNamesp
 		// defined on the Pod Spec.
 		OriginalHealthProbes: originalHealthProbes,
 	}
-	yamlContent, err := getEnvoyConfigYAML(configMeta, wh.configurator)
+	yamlContent, err := getEnvoyConfigYAML(cn, configMeta, wh.configurator)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating Envoy bootstrap YAML")
 		return nil, err
