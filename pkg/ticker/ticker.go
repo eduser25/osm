@@ -117,7 +117,7 @@ func tickerConfigListener(c configurator.Configurator, ready chan struct{}, stop
 }
 
 func ticker(ready chan struct{}, stop <-chan struct{}) {
-	ticker := make(<-chan time.Time)
+	ticker := time.NewTicker(60 * time.Second).C
 	tickStart := events.GetPubSubInstance().Subscribe(
 		announcements.TickerStart)
 	tickStop := events.GetPubSubInstance().Subscribe(
@@ -145,10 +145,10 @@ func ticker(ready chan struct{}, stop <-chan struct{}) {
 			}
 
 			log.Info().Msgf("Ticker Starting with duration of %s", tickerDuration)
-			ticker = time.NewTicker(tickerDuration).C
+			ticker = time.NewTicker(60 * time.Second).C
 		case <-tickStop:
 			log.Info().Msgf("Ticker Stopping")
-			ticker = make(<-chan time.Time)
+			ticker = time.NewTicker(60 * time.Second).C
 		case <-ticker:
 			log.Info().Msgf("Ticker requesting broadcast proxy update")
 			events.GetPubSubInstance().Publish(
