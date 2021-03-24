@@ -17,6 +17,7 @@ import (
 	"github.com/openservicemesh/osm/pkg/envoy/rds"
 	"github.com/openservicemesh/osm/pkg/envoy/sds"
 	"github.com/openservicemesh/osm/pkg/utils"
+	"github.com/openservicemesh/osm/pkg/workerpool"
 )
 
 // ServerType is the type identifier for the ADS server
@@ -38,6 +39,7 @@ func NewADSServer(meshCatalog catalog.MeshCataloger, enableDebug bool, osmNamesp
 		certManager:    certManager,
 		xdsMapLogMutex: sync.Mutex{},
 		xdsLog:         make(map[certificate.CommonName]map[envoy.TypeURI][]time.Time),
+		workers:        workerpool.NewWorkerPool(0),
 	}
 
 	return &server

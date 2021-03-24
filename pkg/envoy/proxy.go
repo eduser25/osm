@@ -2,6 +2,7 @@ package envoy
 
 import (
 	"fmt"
+	"hash/fnv"
 	"net"
 	"strings"
 	"time"
@@ -27,6 +28,8 @@ type Proxy struct {
 	lastSentVersion    map[TypeURI]uint64
 	lastAppliedVersion map[TypeURI]uint64
 	lastNonce          map[TypeURI]string
+
+	hash uint64
 
 	// Records metadata around the Kubernetes Pod on which this Envoy Proxy is installed.
 	// This could be nil if the Envoy is not operating in a Kubernetes cluster (VM for example)
@@ -159,6 +162,10 @@ func (p Proxy) GetCertificateSerialNumber() certificate.SerialNumber {
 	return p.xDSCertificateSerialNumber
 }
 
+func (p Proxy) Hash() uint64 {
+	return p.hash
+}
+
 // GetConnectedAt returns the timestamp of when the given proxy connected to the control plane.
 func (p Proxy) GetConnectedAt() time.Time {
 	return p.connectedAt
@@ -171,6 +178,10 @@ func (p Proxy) GetIP() net.Addr {
 
 // NewProxy creates a new instance of an Envoy proxy connected to the xDS servers.
 func NewProxy(certCommonName certificate.CommonName, certSerialNumber certificate.SerialNumber, ip net.Addr) *Proxy {
+	h := fnv.New64()
+	h.Write([]byte(certCommonName.String()))
+	hash := h.Sum64()
+
 	return &Proxy{
 		xDSCertificateCommonName:   certCommonName,
 		xDSCertificateSerialNumber: certSerialNumber,
@@ -178,6 +189,7 @@ func NewProxy(certCommonName certificate.CommonName, certSerialNumber certificat
 		Addr: ip,
 
 		connectedAt: time.Now(),
+		hash:        hash,
 
 		lastNonce:          make(map[TypeURI]string),
 		lastSentVersion:    make(map[TypeURI]uint64),
