@@ -28,6 +28,7 @@ type sendJob struct {
 	ads      *xds_discovery.AggregatedDiscoveryService_StreamAggregatedResourcesServer
 	request  *xds_discovery.DiscoveryRequest
 	s        *Server
+	waiter   chan struct{}
 }
 
 func (tj *sendJob) Run() {
@@ -36,6 +37,7 @@ func (tj *sendJob) Run() {
 		log.Error().Err(err).Msgf("Failed to create and send %v update to Envoy with xDS Certificate SerialNumber=%s",
 			tj.typeurls, tj.proxy.GetCertificateCommonName().String())
 	}
+	tj.waiter <- struct{}{}
 }
 
 func (tj *sendJob) JobName() string {
@@ -211,6 +213,7 @@ func (s *Server) StreamAggregatedResources(server xds_discovery.AggregatedDiscov
 				xdsUpdatePaths = mapset.NewSetWith(typeURL)
 			}
 
+			waitchan := make(chan struct{})
 			s.workers.AddJob(&sendJob{
 				typeurls: xdsUpdatePaths,
 				proxy:    proxy,
@@ -218,10 +221,13 @@ func (s *Server) StreamAggregatedResources(server xds_discovery.AggregatedDiscov
 				ads:      &server,
 				request:  &discoveryRequest,
 				s:        s,
+				waiter:   waitchan,
 			})
+			<-waitchan
 
 		case <-broadcastUpdate:
 			log.Info().Msgf("Broadcast wake for Proxy SerialNumber=%s UID=%s", proxy.GetCertificateSerialNumber(), proxy.GetPodUID())
+			waitchan := make(chan struct{})
 			s.workers.AddJob(&sendJob{
 				typeurls: mapset.NewSetWith(
 					envoy.TypeCDS,
@@ -234,7 +240,9 @@ func (s *Server) StreamAggregatedResources(server xds_discovery.AggregatedDiscov
 				ads:     &server,
 				request: nil,
 				s:       s,
+				waiter:  waitchan,
 			})
+			<-waitchan
 
 		case certUpdateMsg := <-certAnnouncement:
 			certificate := certUpdateMsg.(events.PubSubMessage).NewObj.(certificate.Certificater)

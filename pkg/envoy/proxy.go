@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openservicemesh/osm/pkg/certificate"
@@ -25,9 +26,12 @@ type Proxy struct {
 	// The time this Proxy connected to the OSM control plane
 	connectedAt time.Time
 
-	lastSentVersion    map[TypeURI]uint64
-	lastAppliedVersion map[TypeURI]uint64
-	lastNonce          map[TypeURI]string
+	lastSentVersionMutex    *sync.Mutex
+	lastSentVersion         map[TypeURI]uint64
+	lastAppliedVersionMutex *sync.Mutex
+	lastAppliedVersion      map[TypeURI]uint64
+	lastNonceMutex          *sync.Mutex
+	lastNonce               map[TypeURI]string
 
 	hash uint64
 
@@ -190,6 +194,10 @@ func NewProxy(certCommonName certificate.CommonName, certSerialNumber certificat
 
 		connectedAt: time.Now(),
 		hash:        hash,
+
+		lastSentVersionMutex:    &sync.Mutex{},
+		lastAppliedVersionMutex: &sync.Mutex{},
+		lastNonceMutex:          &sync.Mutex{},
 
 		lastNonce:          make(map[TypeURI]string),
 		lastSentVersion:    make(map[TypeURI]uint64),
