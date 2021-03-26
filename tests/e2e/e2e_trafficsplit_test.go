@@ -70,7 +70,7 @@ func testTrafficSplit(appProtocol string) {
 
 	It("Tests HTTP traffic from Clients to the traffic split Cluster IP", func() {
 		if appProtocol == AppProtocolTCP {
-			Td.T.Skip("skipping")
+			Skip("skipping")
 		}
 		// Install OSM
 		Expect(Td.InstallOSM(Td.GetOSMInstallOpts())).To(Succeed())

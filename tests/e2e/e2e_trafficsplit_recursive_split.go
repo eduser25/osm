@@ -31,9 +31,6 @@ var _ = OSMDescribe("Test traffic split where root service is same as backend se
 	})
 
 func testRecursiveTrafficSplit(appProtocol string) {
-	if appProtocol == AppProtocolTCP {
-		Td.T.Skip("skipping")
-	}
 	defer GinkgoRecover()
 	const (
 		// to name the header we will use to identify the server that replies
@@ -69,6 +66,9 @@ func testRecursiveTrafficSplit(appProtocol string) {
 	var wg sync.WaitGroup
 
 	It("Tests HTTP traffic from Clients to the traffic split Cluster IP", func() {
+		if appProtocol == AppProtocolTCP {
+			Skip("skipping")
+		}
 		// Install OSM
 		Expect(Td.InstallOSM(Td.GetOSMInstallOpts())).To(Succeed())
 
