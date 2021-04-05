@@ -2,6 +2,7 @@ package ads
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/openservicemesh/osm/pkg/announcements"
 	"github.com/openservicemesh/osm/pkg/catalog"
 	"github.com/openservicemesh/osm/pkg/certificate"
+	"github.com/openservicemesh/osm/pkg/configurator"
 	"github.com/openservicemesh/osm/pkg/constants"
 	"github.com/openservicemesh/osm/pkg/envoy"
 	"github.com/openservicemesh/osm/pkg/kubernetes/events"
@@ -19,6 +21,42 @@ import (
 	"github.com/openservicemesh/osm/pkg/service"
 	"github.com/openservicemesh/osm/pkg/utils"
 )
+
+// This is the workqueue Job implementation to issue a Send Response to a proxy
+type sendJob struct {
+	// Send Response parametres
+	typeurls  mapset.Set
+	proxy     *envoy.Proxy
+	cfg       configurator.Configurator
+	adsStream *xds_discovery.AggregatedDiscoveryService_StreamAggregatedResourcesServer
+	request   *xds_discovery.DiscoveryRequest
+	xdsServer *Server
+
+	// Optional waiter
+	jobDoneChannel chan struct{}
+}
+
+// Run implementation for sendResponse job
+func (tj *sendJob) Run() {
+	err := (*tj.xdsServer).sendResponse(tj.typeurls, tj.proxy, tj.adsStream, tj.request, tj.cfg)
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to create and send %v update to Envoy with xDS Certificate SerialNumber=%s",
+			tj.typeurls, tj.proxy.GetCertificateCommonName().String())
+	}
+	tj.jobDoneChannel <- struct{}{}
+}
+
+// JobName implementation for this job, for logging purposes
+func (tj *sendJob) JobName() string {
+	return fmt.Sprintf("sendJob-%s", tj.proxy.GetCertificateSerialNumber())
+}
+
+// Hash implementation for this job to hash to the workers
+func (tj *sendJob) Hash() uint64 {
+	// Uses proxy hash to always serialize work for the same proxy to the same worker,
+	// this avoid out-of-order misshandling of envoy updates by multiple workers
+	return tj.proxy.GetHash()
+}
 
 // StreamAggregatedResources handles streaming of the clusters to the connected Envoy proxies
 // This is evaluated once per new Envoy proxy connecting and remains running for the duration of the gRPC socket.
@@ -178,27 +216,36 @@ func (s *Server) StreamAggregatedResources(server xds_discovery.AggregatedDiscov
 				xdsUpdatePaths = mapset.NewSetWith(typeURL)
 			}
 
-			err = s.sendResponse(xdsUpdatePaths, proxy, &server, &discoveryRequest, s.cfg)
-			if err != nil {
-				log.Error().Err(err).Msgf("Failed to create and send %s update to Envoy with xDS Certificate SerialNumber=%s on Pod with UID=%s",
-					envoy.XDSShortURINames[typeURL], proxy.GetCertificateSerialNumber(), proxy.GetPodUID())
-				continue
-			}
+			jobDone := make(chan struct{}, 1)
+			s.workers.AddJob(&sendJob{
+				typeurls:       xdsUpdatePaths,
+				proxy:          proxy,
+				cfg:            s.cfg,
+				adsStream:      &server,
+				request:        &discoveryRequest,
+				xdsServer:      s,
+				jobDoneChannel: jobDone,
+			})
+			<-jobDone
 
 		case <-broadcastUpdate:
 			log.Info().Msgf("Broadcast wake for Proxy SerialNumber=%s UID=%s", proxy.GetCertificateSerialNumber(), proxy.GetPodUID())
-			err := s.sendResponse(mapset.NewSetWith(
-				envoy.TypeCDS,
-				envoy.TypeEDS,
-				envoy.TypeLDS,
-				envoy.TypeRDS,
-				envoy.TypeSDS),
-				proxy, &server, nil, s.cfg)
-			if err != nil {
-				log.Error().Err(err).Msgf("Failed to create and send ADS update to Envoy with xDS Certificate SerialNumber=%s on Pod with UID=%s",
-					proxy.GetCertificateSerialNumber(), proxy.GetPodUID())
-				continue
-			}
+			jobDone := make(chan struct{}, 1)
+			s.workers.AddJob(&sendJob{
+				typeurls: mapset.NewSetWith(
+					envoy.TypeCDS,
+					envoy.TypeEDS,
+					envoy.TypeLDS,
+					envoy.TypeRDS,
+					envoy.TypeSDS),
+				proxy:          proxy,
+				cfg:            s.cfg,
+				adsStream:      &server,
+				request:        nil,
+				xdsServer:      s,
+				jobDoneChannel: jobDone,
+			})
+			<-jobDone
 
 		case certUpdateMsg := <-certAnnouncement:
 			certificate := certUpdateMsg.(events.PubSubMessage).NewObj.(certificate.Certificater)
@@ -206,23 +253,39 @@ func (s *Server) StreamAggregatedResources(server xds_discovery.AggregatedDiscov
 				// The CN whose corresponding certificate was updated (rotated) by the certificate provider is associated
 				// with this proxy, so update the secrets corresponding to this certificate via SDS.
 				log.Debug().Msgf("Certificate has been updated for proxy with SerialNumber=%s, UID=%s", proxy.GetCertificateSerialNumber(), proxy.GetPodUID())
+
 				// Empty DiscoveryRequest should create the SDS specific request
-				err := s.sendResponse(mapset.NewSetWith(envoy.TypeSDS), proxy, &server, nil, s.cfg)
-				if err != nil {
-					log.Error().Err(err).Msgf("Failed to create and send SDS update to Envoy with xDS Certificate SerialNumber=%s on Pod with UID=%s",
-						proxy.GetCertificateSerialNumber(), proxy.GetPodUID())
-					continue
-				}
+				jobDone := make(chan struct{}, 1)
+				s.workers.AddJob(&sendJob{
+					typeurls: mapset.NewSetWith(
+						envoy.TypeSDS),
+					proxy:          proxy,
+					cfg:            s.cfg,
+					adsStream:      &server,
+					request:        nil,
+					xdsServer:      s,
+					jobDoneChannel: jobDone,
+				})
+				<-jobDone
 			}
 		case <-proxy.Announcements:
 			log.Debug().Msgf("Individual update for Envoy with xDS Certificate SerialNumber=%s on Pod with UID=%s", proxy.GetCertificateSerialNumber(), proxy.GetPodUID())
-			s.sendResponse(mapset.NewSetWith(
-				envoy.TypeCDS,
-				envoy.TypeEDS,
-				envoy.TypeLDS,
-				envoy.TypeRDS,
-				envoy.TypeSDS),
-				proxy, &server, nil, s.cfg)
+			jobDone := make(chan struct{}, 1)
+			s.workers.AddJob(&sendJob{
+				typeurls: mapset.NewSetWith(
+					envoy.TypeCDS,
+					envoy.TypeEDS,
+					envoy.TypeLDS,
+					envoy.TypeRDS,
+					envoy.TypeSDS),
+				proxy:          proxy,
+				cfg:            s.cfg,
+				adsStream:      &server,
+				request:        nil,
+				xdsServer:      s,
+				jobDoneChannel: jobDone,
+			})
+			<-jobDone
 		}
 
 	}

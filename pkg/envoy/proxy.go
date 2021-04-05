@@ -9,6 +9,7 @@ import (
 	"github.com/openservicemesh/osm/pkg/announcements"
 	"github.com/openservicemesh/osm/pkg/certificate"
 	service "github.com/openservicemesh/osm/pkg/service"
+	"github.com/openservicemesh/osm/pkg/utils"
 )
 
 // Proxy is a representation of an Envoy proxy connected to the xDS server.
@@ -30,6 +31,9 @@ type Proxy struct {
 	lastNonce          map[TypeURI]string
 
 	Announcements chan announcements.Announcement
+
+	// hash is based on CommonName
+	hash uint64
 
 	// Records metadata around the Kubernetes Pod on which this Envoy Proxy is installed.
 	// This could be nil if the Envoy is not operating in a Kubernetes cluster (VM for example)
@@ -162,6 +166,11 @@ func (p Proxy) GetCertificateSerialNumber() certificate.SerialNumber {
 	return p.xDSCertificateSerialNumber
 }
 
+// GetHash returns the proxy hash based on its xDSCertificateCommonName
+func (p Proxy) GetHash() uint64 {
+	return p.hash
+}
+
 // GetConnectedAt returns the timestamp of when the given proxy connected to the control plane.
 func (p Proxy) GetConnectedAt() time.Time {
 	return p.connectedAt
@@ -181,6 +190,7 @@ func NewProxy(certCommonName certificate.CommonName, certSerialNumber certificat
 		Addr: ip,
 
 		connectedAt: time.Now(),
+		hash:        utils.HashFromString(certCommonName.String()),
 
 		Announcements:      make(chan announcements.Announcement, 1),
 		lastNonce:          make(map[TypeURI]string),

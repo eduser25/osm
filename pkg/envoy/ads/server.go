@@ -17,10 +17,15 @@ import (
 	"github.com/openservicemesh/osm/pkg/envoy/rds"
 	"github.com/openservicemesh/osm/pkg/envoy/sds"
 	"github.com/openservicemesh/osm/pkg/utils"
+	"github.com/openservicemesh/osm/pkg/workerpool"
 )
 
-// ServerType is the type identifier for the ADS server
-const ServerType = "ADS"
+const (
+	// ServerType is the type identifier for the ADS server
+	ServerType = "ADS"
+	// DefaultWorkers is the default number of workerpool workers (0 is GOMAXPROCS)
+	DefaultWorkers = 0
+)
 
 // NewADSServer creates a new Aggregated Discovery Service server
 func NewADSServer(meshCatalog catalog.MeshCataloger, enableDebug bool, osmNamespace string, cfg configurator.Configurator, certManager certificate.Manager) *Server {
@@ -38,6 +43,7 @@ func NewADSServer(meshCatalog catalog.MeshCataloger, enableDebug bool, osmNamesp
 		certManager:    certManager,
 		xdsMapLogMutex: sync.Mutex{},
 		xdsLog:         make(map[certificate.CommonName]map[envoy.TypeURI][]time.Time),
+		workers:        workerpool.NewWorkerPool(DefaultWorkers),
 	}
 
 	return &server
