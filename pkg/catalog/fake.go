@@ -61,7 +61,7 @@ func NewFakeMeshCatalog(kubeClient kubernetes.Interface) *MeshCatalog {
 
 		return services
 	}).AnyTimes()
-	mockKubeController.EXPECT().ListServiceAccounts().DoAndReturn(func() []*corev1.ServiceAccount {
+	mockKubeController.EXPECT().ListServiceAccountsC().DoAndReturn(func() []*corev1.ServiceAccount {
 		// play pretend this call queries a controller cache
 		var serviceAccounts []*corev1.ServiceAccount
 

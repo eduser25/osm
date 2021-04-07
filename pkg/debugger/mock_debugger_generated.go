@@ -120,11 +120,12 @@ func (mr *MockMeshCatalogDebuggerMockRecorder) ListExpectedProxies() *gomock.Cal
 }
 
 // ListMonitoredNamespaces mocks base method
-func (m *MockMeshCatalogDebugger) ListMonitoredNamespaces() []string {
+func (m *MockMeshCatalogDebugger) ListMonitoredNamespaces() ([]string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListMonitoredNamespaces")
 	ret0, _ := ret[0].([]string)
-	return ret0
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // ListMonitoredNamespaces indicates an expected call of ListMonitoredNamespaces

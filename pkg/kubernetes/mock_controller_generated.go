@@ -122,7 +122,7 @@ func (mr *MockControllerMockRecorder) ListPods() *gomock.Call {
 }
 
 // ListServiceAccounts mocks base method
-func (m *MockController) ListServiceAccounts() []*v1.ServiceAccount {
+func (m *MockController) ListServiceAccountsC() []*v1.ServiceAccount {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListServiceAccounts")
 	ret0, _ := ret[0].([]*v1.ServiceAccount)
@@ -130,9 +130,9 @@ func (m *MockController) ListServiceAccounts() []*v1.ServiceAccount {
 }
 
 // ListServiceAccounts indicates an expected call of ListServiceAccounts
-func (mr *MockControllerMockRecorder) ListServiceAccounts() *gomock.Call {
+func (mr *MockControllerMockRecorder) ListServiceAccountsC() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListServiceAccounts", reflect.TypeOf((*MockController)(nil).ListServiceAccounts))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListServiceAccounts", reflect.TypeOf((*MockController)(nil).ListServiceAccountsC))
 }
 
 // ListServiceAccountsForService mocks base method

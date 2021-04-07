@@ -19,7 +19,7 @@ import (
 )
 
 // NewKubernetesController returns a new kubernetes.Controller which means to provide access to locally-cached k8s resources
-func NewKubernetesController(kubeClient kubernetes.Interface, meshName string, stop chan struct{}, selectInformers ...InformerKey) (Controller, error) {
+func NewKubernetesController(kubeClient kubernetes.Interface, meshName string, stop chan struct{}, selectInformers ...InformerKey) (*Client, error) {
 	// Initialize client object
 	client := Client{
 		kubeClient:  kubeClient,
@@ -27,6 +27,8 @@ func NewKubernetesController(kubeClient kubernetes.Interface, meshName string, s
 		informers:   informerCollection{},
 		cacheSynced: make(chan interface{}),
 	}
+	// Originally, we use ourselves as our own interface provider
+	client.SelfReference = &client
 
 	// Initialize informers
 	informerInitHandlerMap := map[InformerKey]func(){
@@ -51,7 +53,7 @@ func NewKubernetesController(kubeClient kubernetes.Interface, meshName string, s
 		return nil, err
 	}
 
-	return client, nil
+	return &client, nil
 }
 
 // Initializes Namespace monitoring
@@ -165,13 +167,13 @@ func (c *Client) run(stop <-chan struct{}) error {
 }
 
 // IsMonitoredNamespace returns a boolean indicating if the namespace is among the list of monitored namespaces
-func (c Client) IsMonitoredNamespace(namespace string) bool {
+func (c *Client) IsMonitoredNamespace(namespace string) bool {
 	_, exists, _ := c.informers[Namespaces].GetStore().GetByKey(namespace)
 	return exists
 }
 
 // ListMonitoredNamespaces returns all namespaces that the mesh is monitoring.
-func (c Client) ListMonitoredNamespaces() ([]string, error) {
+func (c *Client) ListMonitoredNamespaces() ([]string, error) {
 	var namespaces []string
 
 	for _, ns := range c.informers[Namespaces].GetStore().List() {
@@ -186,7 +188,7 @@ func (c Client) ListMonitoredNamespaces() ([]string, error) {
 }
 
 // GetService retrieves the Kubernetes Services resource for the given MeshService
-func (c Client) GetService(svc service.MeshService) *corev1.Service {
+func (c *Client) GetService(svc service.MeshService) *corev1.Service {
 	// client-go cache uses <namespace>/<name> as key
 	svcIf, exists, err := c.informers[Services].GetStore().GetByKey(svc.String())
 	if exists && err == nil {
@@ -197,13 +199,13 @@ func (c Client) GetService(svc service.MeshService) *corev1.Service {
 }
 
 // ListServices returns a list of services that are part of monitored namespaces
-func (c Client) ListServices() []*corev1.Service {
+func (c *Client) ListServices() []*corev1.Service {
 	var services []*corev1.Service
 
 	for _, serviceInterface := range c.informers[Services].GetStore().List() {
 		svc := serviceInterface.(*corev1.Service)
 
-		if !c.IsMonitoredNamespace(svc.Namespace) {
+		if !c.SelfReference.IsMonitoredNamespace(svc.Namespace) {
 			continue
 		}
 		services = append(services, svc)
@@ -212,7 +214,7 @@ func (c Client) ListServices() []*corev1.Service {
 }
 
 // ListServiceAccounts returns a list of service accounts that are part of monitored namespaces
-func (c Client) ListServiceAccounts() []*corev1.ServiceAccount {
+func (c Client) ListServiceAccountsC() []*corev1.ServiceAccount {
 	var serviceAccounts []*corev1.ServiceAccount
 
 	for _, serviceInterface := range c.informers[ServiceAccounts].GetStore().List() {
@@ -227,7 +229,7 @@ func (c Client) ListServiceAccounts() []*corev1.ServiceAccount {
 }
 
 // GetNamespace returns a Namespace resource if found, nil otherwise.
-func (c Client) GetNamespace(ns string) *corev1.Namespace {
+func (c *Client) GetNamespace(ns string) *corev1.Namespace {
 	nsIf, exists, err := c.informers[Namespaces].GetStore().GetByKey(ns)
 	if exists && err == nil {
 		ns := nsIf.(*corev1.Namespace)
@@ -239,12 +241,12 @@ func (c Client) GetNamespace(ns string) *corev1.Namespace {
 // ListPods returns a list of pods part of the mesh
 // Kubecontroller does not currently segment pod notifications, hence it receives notifications
 // for all k8s Pods.
-func (c Client) ListPods() []*corev1.Pod {
+func (c *Client) ListPods() []*corev1.Pod {
 	var pods []*corev1.Pod
 
 	for _, podInterface := range c.informers[Pods].GetStore().List() {
 		pod := podInterface.(*corev1.Pod)
-		if !c.IsMonitoredNamespace(pod.Namespace) {
+		if !c.SelfReference.IsMonitoredNamespace(pod.Namespace) {
 			continue
 		}
 		pods = append(pods, pod)
@@ -254,7 +256,7 @@ func (c Client) ListPods() []*corev1.Pod {
 
 // GetEndpoints returns the endpoint for a given service, otherwise returns nil if not found
 // or error if the API errored out.
-func (c Client) GetEndpoints(svc service.MeshService) (*corev1.Endpoints, error) {
+func (c *Client) GetEndpoints(svc service.MeshService) (*corev1.Endpoints, error) {
 	ep, exists, err := c.informers[Endpoints].GetStore().GetByKey(svc.String())
 	if err != nil {
 		return nil, err
@@ -266,7 +268,7 @@ func (c Client) GetEndpoints(svc service.MeshService) (*corev1.Endpoints, error)
 }
 
 // ListServiceAccountsForService lists ServiceAccounts associated with the given service
-func (c Client) ListServiceAccountsForService(svc service.MeshService) ([]service.K8sServiceAccount, error) {
+func (c *Client) ListServiceAccountsForService(svc service.MeshService) ([]service.K8sServiceAccount, error) {
 	var svcAccounts []service.K8sServiceAccount
 
 	k8sSvc := c.GetService(svc)

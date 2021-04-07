@@ -28,11 +28,11 @@ func NewMeshCatalog(kubeController k8s.Controller, kubeClient kubernetes.Interfa
 		kubeClient:     kubeClient,
 		kubeController: kubeController,
 	}
+	mc.SelfReference = &mc
 
 	// Run release certificate handler, which listens to podDelete events
 	mc.releaseCertificateHandler()
 
-	go mc.dispatcher()
 	ticker.InitTicker(cfg)
 
 	return &mc
@@ -41,4 +41,9 @@ func NewMeshCatalog(kubeController k8s.Controller, kubeClient kubernetes.Interfa
 // GetSMISpec returns a MeshCatalog's SMI Spec
 func (mc *MeshCatalog) GetSMISpec() smi.MeshSpec {
 	return mc.meshSpec
+}
+
+// WithRlock implements a with-read-lock wrapper to work on catalog
+func (mc *MeshCatalog) WithRlock(f func()) {
+	f()
 }

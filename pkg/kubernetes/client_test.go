@@ -285,7 +285,7 @@ var _ = Describe("Test Namespace KubeController Methods", func() {
 		})
 
 		It("should return an empty list when no service accounts are found", func() {
-			services := kubeController.ListServiceAccounts()
+			services := kubeController.ListServiceAccountsC()
 			Expect(len(services)).To(Equal(0))
 		})
 
@@ -339,7 +339,7 @@ var _ = Describe("Test Namespace KubeController Methods", func() {
 				<-serviceChannel
 			}
 
-			svcAccounts := kubeController.ListServiceAccounts()
+			svcAccounts := kubeController.ListServiceAccountsC()
 			Expect(len(testSvcAccounts)).To(Equal(len(svcAccounts)))
 		})
 	})

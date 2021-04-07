@@ -279,7 +279,7 @@ func TestListOutboundTrafficPolicies(t *testing.T) {
 					serviceAccounts = append(serviceAccounts, k8sSvcAccount)
 				}
 				mockKubeController.EXPECT().ListServices().Return(services).AnyTimes()
-				mockKubeController.EXPECT().ListServiceAccounts().Return(serviceAccounts).AnyTimes()
+				mockKubeController.EXPECT().ListServiceAccountsC().Return(serviceAccounts).AnyTimes()
 			} else {
 				mockMeshSpec.EXPECT().ListTrafficSplits().Return(tc.trafficsplits).AnyTimes()
 				mockMeshSpec.EXPECT().ListTrafficTargets().Return(tc.traffictargets).AnyTimes()

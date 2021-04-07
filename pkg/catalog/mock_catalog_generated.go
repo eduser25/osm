@@ -262,11 +262,12 @@ func (mr *MockMeshCatalogerMockRecorder) ListInboundTrafficTargetsWithRoutes(arg
 }
 
 // ListMonitoredNamespaces mocks base method
-func (m *MockMeshCataloger) ListMonitoredNamespaces() []string {
+func (m *MockMeshCataloger) ListMonitoredNamespaces() ([]string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListMonitoredNamespaces")
 	ret0, _ := ret[0].([]string)
-	return ret0
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // ListMonitoredNamespaces indicates an expected call of ListMonitoredNamespaces
@@ -343,4 +344,16 @@ func (m *MockMeshCataloger) UnregisterProxy(arg0 *envoy.Proxy) {
 func (mr *MockMeshCatalogerMockRecorder) UnregisterProxy(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnregisterProxy", reflect.TypeOf((*MockMeshCataloger)(nil).UnregisterProxy), arg0)
+}
+
+// WithRlock mocks base method
+func (m *MockMeshCataloger) WithRlock(arg0 func()) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "WithRlock", arg0)
+}
+
+// WithRlock indicates an expected call of WithRlock
+func (mr *MockMeshCatalogerMockRecorder) WithRlock(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WithRlock", reflect.TypeOf((*MockMeshCataloger)(nil).WithRlock), arg0)
 }

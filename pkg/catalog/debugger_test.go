@@ -79,7 +79,8 @@ var _ = Describe("Test catalog proxy register/unregister", func() {
 
 	Context("Test ListMonitoredNamespaces", func() {
 		It("lists monitored namespaces", func() {
-			actual := mc.ListMonitoredNamespaces()
+			actual, err := mc.ListMonitoredNamespaces()
+			Expect(err).To(BeNil())
 			listExpectedNs := tests.GetUnique([]string{
 				tests.BookstoreV1Service.Namespace,
 				tests.BookbuyerService.Namespace,
