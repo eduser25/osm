@@ -19,8 +19,8 @@ OpenServiceMesh:
   osmcontroller:
     resource:
       limits:
-        cpu: "1.5"
-        memory: "512M"
+        cpu: "2"
+        memory: "2G"
       requests:
         cpu: "0.5"
         memory: "128M"
@@ -140,8 +140,8 @@ OpenServiceMesh:
     replicaCount: 1
     resource:
       limits:
-        cpu: "0.5"
-        memory: "64M"
+        cpu: "1"
+        memory: "128M"
       requests:
         cpu: "0.3"
         memory: "64M"

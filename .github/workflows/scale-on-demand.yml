@@ -22,7 +22,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
       - name: Create scale cluster
-        run: az aks create --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --name scale-ondemand-$GITHUB_RUN_ID --generate-ssh-keys --nodepool-name s$GITHUB_RUN_ID --node-count 8 --max-pods 250 --node-vm-size Standard_D4s_v3
+        run: az aks create --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --name scale-ondemand-$GITHUB_RUN_ID --generate-ssh-keys --nodepool-name s$GITHUB_RUN_ID --node-count 10 --max-pods 250 --node-vm-size Standard_D4s_v3
       - name: Set Kube Context
         run: az aks get-credentials --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --name scale-ondemand-$GITHUB_RUN_ID 
       # - uses: azure/k8s-set-context@v1
