@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openservicemesh/osm/pkg/announcements"
 	"github.com/openservicemesh/osm/pkg/certificate"
 	service "github.com/openservicemesh/osm/pkg/service"
 )
@@ -27,6 +28,8 @@ type Proxy struct {
 	lastSentVersion    map[TypeURI]uint64
 	lastAppliedVersion map[TypeURI]uint64
 	lastNonce          map[TypeURI]string
+
+	Announcements chan announcements.Announcement
 
 	// Records metadata around the Kubernetes Pod on which this Envoy Proxy is installed.
 	// This could be nil if the Envoy is not operating in a Kubernetes cluster (VM for example)
@@ -179,6 +182,7 @@ func NewProxy(certCommonName certificate.CommonName, certSerialNumber certificat
 
 		connectedAt: time.Now(),
 
+		Announcements:      make(chan announcements.Announcement, 1),
 		lastNonce:          make(map[TypeURI]string),
 		lastSentVersion:    make(map[TypeURI]uint64),
 		lastAppliedVersion: make(map[TypeURI]uint64),

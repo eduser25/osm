@@ -60,19 +60,12 @@ func (s *Server) StreamAggregatedResources(server xds_discovery.AggregatedDiscov
 	// Register for certificate rotation updates
 	certAnnouncement := events.GetPubSubInstance().Subscribe(announcements.CertificateRotated)
 
-	// Issues a send all response on a connecting envoy
-	// If this were to fail, it most likely just means we still have configuration being applied on flight,
-	// which will get triggered by the dispatcher anyway
-	err = s.sendResponse(mapset.NewSetWith(
-		envoy.TypeCDS,
-		envoy.TypeEDS,
-		envoy.TypeLDS,
-		envoy.TypeRDS,
-		envoy.TypeSDS),
-		proxy, &server, nil, s.cfg)
-	if err != nil {
-		log.Error().Err(err).Msgf("Initial sendResponse for proxy %s returned error", proxy.GetCertificateSerialNumber())
-	}
+	// New dispatcher notifications available, dispatcher will take care to schedule update for this proxy
+	events.GetPubSubInstance().Publish(events.PubSubMessage{
+		AnnouncementType: announcements.ProxyAdded,
+		OldObj:           nil,
+		NewObj:           proxy,
+	})
 
 	for {
 		select {
@@ -221,7 +214,17 @@ func (s *Server) StreamAggregatedResources(server xds_discovery.AggregatedDiscov
 					continue
 				}
 			}
+		case <-proxy.Announcements:
+			log.Debug().Msgf("Individual update for Envoy with xDS Certificate SerialNumber=%s on Pod with UID=%s", proxy.GetCertificateSerialNumber(), proxy.GetPodUID())
+			s.sendResponse(mapset.NewSetWith(
+				envoy.TypeCDS,
+				envoy.TypeEDS,
+				envoy.TypeLDS,
+				envoy.TypeRDS,
+				envoy.TypeSDS),
+				proxy, &server, nil, s.cfg)
 		}
+
 	}
 }
 
