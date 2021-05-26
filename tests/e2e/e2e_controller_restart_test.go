@@ -28,6 +28,8 @@ func testHTTPTrafficWithControllerRestart() {
 		var ns = []string{sourceName, destName}
 
 		It("Tests HTTP traffic for client pod -> server pod", func() {
+			Skip("Skip restart test")
+
 			// Install OSM
 			Expect(Td.InstallOSM(Td.GetOSMInstallOpts())).To(Succeed())
 
