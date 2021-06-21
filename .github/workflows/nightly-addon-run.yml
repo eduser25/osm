@@ -1,0 +1,69 @@
+name: Nightly Addon Run
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+# AZURE_CREDENTIALS -> Azure credentials: https://github.com/Azure/login#configure-deployment-credentials
+# AZ_RESOURCE_GROUP -> Resource group: needs to be created
+
+env:
+  CTR_REGISTRY: ${{ secrets.ACR }}
+  CTR_REGISTRY_USER: ${{ secrets.ACRUSER }}
+  CTR_REGISTRY_PASSWORD: ${{ secrets.ACRPW }}
+
+jobs:
+  aks-addon-osm-e2e:
+    name: Run aks-addon OSM e2e pipeline
+    runs-on: ubuntu-latest
+    steps:
+      # Setup cluster
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Install aks preview extension
+        run: az extension add --name aks-preview
+      - name: Create Cluster
+        run: az aks create --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --name addon-test-$GITHUB_RUN_ID -a open-service-mesh --generate-ssh-keys -l australiaeast  --nodepool-name s$GITHUB_RUN_ID --node-count 3 --max-pods 250 --node-vm-size Standard_D2_v3
+      - name: Set kube context
+        run: az aks get-credentials --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --name addon-test-$GITHUB_RUN_ID
+
+      # Checkout OSM and prepare to run tests
+      - name: Checkout v2
+        uses: actions/checkout@v2
+        with:
+          ref: v0.8.4-f
+      - name: Setup Go 1.16
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.16
+      - name: Checkout v2
+        uses: actions/checkout@v2
+        with:
+          path: ~/go/pkg/mod
+          ref: v0.8.4-f
+      - name: Docker Login
+        run: docker login --username "$CTR_REGISTRY_USER" --password "$CTR_REGISTRY_PASSWORD" $CTR_REGISTRY
+      - name: Docker push
+        run: make build-osm docker-push-tcp-echo-server
+      # Run E2E
+      - name: Run E2E upstream tests
+        id: e2e_tests
+        run: go test ./tests/e2e -test.v -ginkgo.v -ginkgo.progress -test.timeout 0 -test.failfast -ginkgo.failFast -installType=NoInstall
+        env:
+          K8S_NAMESPACE: "kube-system"
+        continue-on-error: true
+      - name: Save results
+        uses: actions/upload-artifact@v2
+        with:
+          name: results
+          path: /tmp/test**/
+
+      # Clean up cluster
+      - name: Delete Cluster
+        if: ${{ always() }}
+        run: az aks delete --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --name addon-test-$GITHUB_RUN_ID --yes
+      - name: Check for failure
+        if: ${{ steps.e2e_tests.outcome == 'failure'}}  
+        run: exit 1

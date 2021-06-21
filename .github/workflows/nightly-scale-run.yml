@@ -1,0 +1,131 @@
+name: Nightly Scale Run
+on:
+  schedule:
+    - cron: "0 22 * * *"
+  workflow_dispatch:  # click the button on Github repo!
+
+env:
+  CTR_REGISTRY: ${{ secrets.ACR }}
+  CTR_REGISTRY_USER: ${{ secrets.ACRUSER }}
+  CTR_REGISTRY_PASSWORD: ${{ secrets.ACRPW }}
+  # CTR_TAG: latest  # defaulted
+
+# AZURE_CREDENTIALS -> Azure credentials: https://github.com/Azure/login#configure-deployment-credentials
+# AZ_RESOURCE_GROUP -> Resource group: needs to be created
+
+jobs:
+  rebase-upstream:
+    name: Rebase against upstream
+    if: ${{ github.event.inputs.logLevel }}"
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout all repo, full depth
+      - name: Checkout main
+        uses: actions/checkout@v2
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.PERSONAL_TOKEN }}
+      # Pull rebase from upstream, and push main
+      - name: Pull upstream changes
+        id: sync
+        uses: eduser25/Fork-Sync-With-Upstream-action@1.0
+        with:
+          upstream_repository: openservicemesh/osm
+          upstream_branch: main
+          target_branch: main
+          git_push_args: --force
+          github_token: ${{ secrets.PERSONAL_TOKEN }}
+          git_user: eduser25
+          git_email: eduser25@gmail.com
+          git_pull_rebase_config: true
+  nightly-scale-run:
+    name: Run Scale Pipeline
+    needs: rebase-upstream
+    runs-on: ubuntu-latest
+    steps:
+    # Setup cluster
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Create scale cluster
+        run: az aks create --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --location westus2 --kubernetes-version 1.20.7  --name nightly-test-$GITHUB_RUN_ID --generate-ssh-keys --nodepool-name s$GITHUB_RUN_ID --node-count 10 --max-pods 250 --node-vm-size Standard_D4s_v3
+      - name: Set Kube Context
+        run: az aks get-credentials --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --name nightly-test-$GITHUB_RUN_ID 
+      # - uses: azure/k8s-set-context@v1
+      #   with:
+      #     method: kubeconfig
+      #     kubeconfig: ${{secrets.KUBECONF}}
+      #   id: setcontext
+
+      - name: Checkout v2
+        uses: actions/checkout@v2
+        with:
+          ref: main
+      - name: Checkout v2
+        uses: actions/checkout@v2
+        with:
+          path: ~/go/pkg/mod
+          ref: main
+      - name: Restore Module Cache
+        uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-gomod2-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-gomod2-
+      - name: Restore Build Cache
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('**/*.go') }}
+      - name: Setup Go 1.16
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.16
+      - name: Build binaries
+        run: make build-osm
+      - name: Docker Login
+        run: docker login --username "$CTR_REGISTRY_USER" --password "$CTR_REGISTRY_PASSWORD" $CTR_REGISTRY
+      - name: Docker push
+        run: make docker-push-osm-controller docker-push-init docker-push-osm-injector docker-push-init-osm-controller
+      - name: Run Scale tests
+        run: go test ./tests/scale -test.v -ginkgo.v -ginkgo.progress -test.timeout 0 -test.failfast -ginkgo.failFast -ginkgo.focus='ScaleClientServerTrafficSplit' --cleanupTest=false
+        env:
+          K8S_NAMESPACE: "osm-system"
+        # Scale tests never succeed per se
+        continue-on-error: true
+      - name: Save results on Github
+        uses: actions/upload-artifact@v2
+        with:
+          name: results
+          path: /tmp/test**/*
+      - name: Create Json Teams Card
+        run: |
+          DATE=$(date +'%m-%d-%Y')
+          
+          echo "Scale [run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) results:" > comment.txt
+          echo "<pre>" >> comment.txt
+          cat /tmp/test*/results.txt >> comment.txt
+          echo "<pre>" >> comment.txt
+          touch temp.txt
+          echo -n "{
+            \"@type\": \"MessageCard\",
+            \"@context\": \"http://schema.org/extensions\",
+            \"summary\": \"Scale run $DATE\",
+            \"title\": \"Scale run $DATE\",
+            \"text\": $(cat comment.txt | jq -sR),
+            }" > card.json
+      - name: Send to teams
+        run: |
+          curl \
+          -X POST \
+            ${{ secrets.WEBHOOK }} \
+            -H "Content-Type: application/json" \
+            -d @card.json
+      
+      # Clean up cluster, always run
+      - name: Delete Cluster
+        if: ${{ always() }}
+        run: az aks delete --resource-group ${{ secrets.AZ_RESOURCE_GROUP }} --name nightly-test-$GITHUB_RUN_ID --yes
